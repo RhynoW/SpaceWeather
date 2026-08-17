@@ -1,0 +1,31 @@
+# SWX-SDA 相依套件
+# 版本下限依開發環境實測（Python 3.13 / DuckDB 1.5 / pandas 2.2）
+
+# 資料層
+duckdb>=1.0
+pandas>=2.2
+pyarrow>=14.0
+numpy>=1.26
+
+# 設定與擷取
+PyYAML>=6.0
+requests>=2.31
+
+# 物理模型
+pymsis>=0.10          # 熱氣層密度 NRLMSIS
+ppigrf>=2.1           # 地磁參考場 IGRF-14（議題二基準場）
+scipy>=1.11
+
+# 預報引擎
+scikit-learn>=1.4
+
+# 儀表板
+streamlit>=1.40
+plotly>=5.20
+
+# API
+Flask>=3.0
+flask-cors>=4.0     # 選用：未安裝時 API 仍可運作，只是不送 CORS 標頭
+
+# 測試
+pytest>=8.0

@@ -1,0 +1,512 @@
+# param_registry — 太空天氣參數字典（單一權威來源）
+#
+# 本檔為 §6.3 所述之參數登錄。UI 標籤、API 欄位說明、資料字典文件皆由此檔生成，
+# 避免文件與系統不一致。新增參數一律先在此註冊，才可入庫。
+#
+# 欄位說明：
+#   code          參數代碼（swx_observation.param_code）
+#   name_zh/en    顯示名稱
+#   unit          單位（無單位者填 "1"）
+#   domain        所屬領域 solar / solar_wind / geomag / iono / thermo / orbit
+#   valid_min/max 物理值域，超出即 quality_flag=rejected
+#   spike_limit   單步變化上限（每個 cadence_s 週期），超出即 suspect（null = 不檢查）
+#   cadence_s     名目更新週期（秒）
+#   scale         對應國際分級 G / R / S（null = 無）
+#   impacts       受影響之任務網域（供多頻段矩陣與事件卡使用）
+#   status        ready = 已有來源；planned = 架構已備、來源待建（C1–C3）
+
+params:
+  # ── 太陽輻射通量（CelesTrak SW-All，已具備 A3/A4）────────────────────────
+  - code: F107_OBS
+    name_zh: 太陽 10.7cm 電波通量（觀測）
+    name_en: F10.7 observed
+    unit: sfu
+    domain: solar
+    valid_min: 60.0
+    valid_max: 500.0
+    spike_limit: 60.0
+    cadence_s: 86400
+    scale: null
+    impacts: [ORBIT_PREDICTION]
+    status: ready
+  - code: F107_ADJ
+    name_zh: 太陽 10.7cm 電波通量（1AU 調整）
+    name_en: F10.7 adjusted
+    unit: sfu
+    domain: solar
+    valid_min: 60.0
+    valid_max: 500.0
+    spike_limit: 60.0
+    cadence_s: 86400
+    impacts: [ORBIT_PREDICTION]
+    status: ready
+  - code: F107_OBS_C81
+    name_zh: F10.7 觀測 81 日中心平均
+    name_en: F10.7 obs centered 81-day
+    unit: sfu
+    domain: solar
+    valid_min: 60.0
+    valid_max: 500.0
+    cadence_s: 86400
+    impacts: [ORBIT_PREDICTION]
+    status: ready
+  - code: F107_ADJ_C81
+    name_zh: F10.7 調整 81 日中心平均
+    name_en: F10.7 adj centered 81-day
+    unit: sfu
+    domain: solar
+    valid_min: 60.0
+    valid_max: 500.0
+    cadence_s: 86400
+    impacts: [ORBIT_PREDICTION]
+    status: ready
+  - code: F107_OBS_L81
+    name_zh: F10.7 觀測 81 日末端平均
+    name_en: F10.7 obs last 81-day
+    unit: sfu
+    domain: solar
+    valid_min: 60.0
+    valid_max: 500.0
+    cadence_s: 86400
+    impacts: [ORBIT_PREDICTION]
+    status: ready
+  - code: F107_ADJ_L81
+    name_zh: F10.7 調整 81 日末端平均
+    name_en: F10.7 adj last 81-day
+    unit: sfu
+    domain: solar
+    valid_min: 60.0
+    valid_max: 500.0
+    cadence_s: 86400
+    impacts: [ORBIT_PREDICTION]
+    status: ready
+  - code: F107_Q
+    name_zh: F10.7 資料品質旗標（CSSI Q 欄）
+    name_en: F10.7 data quality flag
+    unit: "1"
+    domain: solar
+    valid_min: 0.0
+    valid_max: 9.0
+    cadence_s: 86400
+    impacts: []
+    status: ready
+  - code: CP
+    name_zh: 每日行星際磁擾特徵值
+    name_en: Cp planetary daily character figure
+    unit: "1"
+    domain: geomag
+    valid_min: 0.0
+    valid_max: 2.5
+    cadence_s: 86400
+    impacts: []
+    status: ready
+  - code: C9
+    name_zh: C9 磁擾指標
+    name_en: C9 index
+    unit: "1"
+    domain: geomag
+    valid_min: 0.0
+    valid_max: 9.0
+    cadence_s: 86400
+    impacts: []
+    status: ready
+  - code: ISN
+    name_zh: 國際太陽黑子數
+    name_en: International sunspot number
+    unit: "1"
+    domain: solar
+    valid_min: 0.0
+    valid_max: 500.0
+    cadence_s: 86400
+    impacts: []
+    status: ready
+
+  # ── 地磁指數（CelesTrak / GFZ，已具備 A3/A5）──────────────────────────
+  - code: KP_3H
+    name_zh: Kp 指數（3 小時）
+    name_en: Kp index
+    unit: "1"
+    domain: geomag
+    valid_min: 0.0
+    valid_max: 9.0
+    spike_limit: 6.0
+    cadence_s: 10800
+    scale: G
+    impacts: [ORBIT_PREDICTION, GNSS_PNT, HF_COMM, SATCOM]
+    status: ready
+  - code: AP_3H
+    name_zh: ap 指數（3 小時）
+    name_en: ap index
+    unit: nT
+    domain: geomag
+    valid_min: 0.0
+    valid_max: 400.0
+    cadence_s: 10800
+    scale: G
+    impacts: [ORBIT_PREDICTION, GNSS_PNT, HF_COMM]
+    status: ready
+  - code: AP_AVG
+    name_zh: Ap 日平均
+    name_en: Ap daily average
+    unit: nT
+    domain: geomag
+    valid_min: 0.0
+    valid_max: 400.0
+    spike_limit: 200.0
+    cadence_s: 86400
+    scale: G
+    impacts: [ORBIT_PREDICTION]
+    status: ready
+
+  - code: HP30
+    name_zh: Hp30 地磁指數（30 分鐘）
+    name_en: Hp30 index
+    unit: "1"
+    domain: geomag
+    valid_min: 0.0
+    valid_max: 12.0
+    cadence_s: 1800
+    scale: G
+    impacts: [ORBIT_PREDICTION, GNSS_PNT, HF_COMM]
+    status: ready
+  - code: AP30
+    name_zh: ap30 地磁指數（30 分鐘）
+    name_en: ap30 index
+    unit: nT
+    domain: geomag
+    valid_min: 0.0
+    valid_max: 1000.0
+    cadence_s: 1800
+    scale: G
+    impacts: [ORBIT_PREDICTION]
+    status: ready
+  - code: AURORA_BOUNDARY_LAT
+    name_zh: 極光橢圓赤道側邊界緯度（北半球）
+    name_en: Auroral oval equatorward boundary latitude
+    unit: deg
+    domain: geomag
+    valid_min: 30.0
+    valid_max: 90.0
+    cadence_s: 1800
+    impacts: [HF_COMM, GNSS_PNT]
+    status: ready
+  - code: AURORA_MAX_PROB
+    name_zh: 極光出現最大機率
+    name_en: Aurora maximum probability
+    unit: "%"
+    domain: geomag
+    valid_min: 0.0
+    valid_max: 100.0
+    cadence_s: 1800
+    impacts: []
+    status: ready
+
+  # ── 環電流與區域地磁（新建 C1/C3）────────────────────────────────────
+  - code: DST
+    name_zh: Dst 指數
+    name_en: Dst index
+    unit: nT
+    domain: geomag
+    valid_min: -600.0
+    valid_max: 100.0
+    spike_limit: 150.0
+    cadence_s: 3600
+    scale: G
+    impacts: [ORBIT_PREDICTION, GNSS_PNT]
+    status: ready
+  - code: SYMH
+    name_zh: SYM-H 指數
+    name_en: SYM-H index
+    unit: nT
+    domain: geomag
+    valid_min: -600.0
+    valid_max: 100.0
+    cadence_s: 60
+    impacts: [ORBIT_PREDICTION]
+    status: planned
+  - code: DB_TW
+    name_zh: 臺灣周邊地磁擾動指數
+    name_en: Regional geomagnetic disturbance (TW)
+    unit: nT
+    domain: geomag
+    valid_min: 0.0
+    valid_max: 2000.0
+    cadence_s: 60
+    impacts: [GNSS_PNT, HF_COMM]
+    status: planned
+
+  # ── 太陽風／IMF（新建 C1）────────────────────────────────────────────
+  - code: IMF_BZ
+    name_zh: 行星際磁場 Bz（GSM）
+    name_en: IMF Bz GSM
+    unit: nT
+    domain: solar_wind
+    valid_min: -80.0
+    valid_max: 80.0
+    cadence_s: 60
+    impacts: [ORBIT_PREDICTION]
+    status: ready
+  - code: IMF_BT
+    name_zh: 行星際磁場總量
+    name_en: IMF Bt
+    unit: nT
+    domain: solar_wind
+    valid_min: 0.0
+    valid_max: 100.0
+    cadence_s: 60
+    impacts: []
+    status: ready
+  - code: SW_V
+    name_zh: 太陽風速度
+    name_en: Solar wind bulk speed
+    unit: km/s
+    domain: solar_wind
+    valid_min: 200.0
+    valid_max: 1200.0
+    cadence_s: 60
+    impacts: [ORBIT_PREDICTION]
+    status: ready
+  - code: SW_T
+    name_zh: 太陽風質子溫度
+    name_en: Solar wind proton temperature
+    unit: K
+    domain: solar_wind
+    valid_min: 0.0
+    valid_max: 5000000.0
+    cadence_s: 60
+    impacts: []
+    status: ready
+  - code: SW_N
+    name_zh: 太陽風質子密度
+    name_en: Solar wind proton density
+    unit: cm^-3
+    domain: solar_wind
+    valid_min: 0.0
+    valid_max: 200.0
+    cadence_s: 60
+    impacts: []
+    status: ready
+
+  # ── 太陽閃焰與 X 射線（GOES／SWPC，已接通）──────────────────────────
+  - code: FLARE_PEAK
+    name_zh: 太陽閃焰峰值通量（0.1–0.8 nm）
+    name_en: Solar flare peak X-ray flux
+    unit: W/m^2
+    domain: solar
+    valid_min: 1.0e-9
+    valid_max: 0.01
+    cadence_s: 0            # 事件驅動，無固定週期
+    scale: R
+    impacts: [HF_COMM, GNSS_PNT, SATELLITE_HEALTH]
+    status: ready
+  - code: FLARE_DURATION
+    name_zh: 太陽閃焰持續時間
+    name_en: Solar flare duration
+    unit: min
+    domain: solar
+    valid_min: 0.0
+    valid_max: 1440.0
+    cadence_s: 0
+    impacts: [HF_COMM]
+    status: ready
+  - code: AR_COUNT
+    name_zh: 太陽活動區數量
+    name_en: Active region count
+    unit: "1"
+    domain: solar
+    valid_min: 0.0
+    valid_max: 100.0
+    cadence_s: 86400
+    impacts: []
+    status: ready
+  - code: AR_AREA_TOTAL
+    name_zh: 太陽黑子總面積
+    name_en: Total sunspot area
+    unit: uHem
+    domain: solar
+    valid_min: 0.0
+    valid_max: 20000.0
+    cadence_s: 86400
+    impacts: []
+    status: ready
+  - code: M_FLARE_PROB
+    name_zh: M 級閃焰發生機率（全日盤面）
+    name_en: M-class flare probability
+    unit: "1"
+    domain: solar
+    valid_min: 0.0
+    valid_max: 1.0
+    cadence_s: 86400
+    impacts: [HF_COMM]
+    status: ready
+  - code: X_FLARE_PROB
+    name_zh: X 級閃焰發生機率（全日盤面）
+    name_en: X-class flare probability
+    unit: "1"
+    domain: solar
+    valid_min: 0.0
+    valid_max: 1.0
+    cadence_s: 86400
+    impacts: [HF_COMM]
+    status: ready
+  - code: XRAY_LONG
+    name_zh: GOES X-ray 通量 0.1–0.8 nm
+    name_en: GOES XRS long
+    unit: W/m^2
+    domain: solar
+    valid_min: 0.0
+    valid_max: 0.01
+    cadence_s: 60
+    scale: R
+    impacts: [HF_COMM]
+    status: ready
+  - code: XRAY_SHORT
+    name_zh: GOES X-ray 通量 0.05–0.4 nm
+    name_en: GOES XRS short
+    unit: W/m^2
+    domain: solar
+    valid_min: 0.0
+    valid_max: 0.01
+    cadence_s: 60
+    impacts: [HF_COMM]
+    status: ready
+  - code: PROT10
+    name_zh: 質子通量 ≥10 MeV
+    name_en: Proton flux >=10 MeV
+    unit: pfu
+    domain: solar
+    valid_min: 0.0
+    valid_max: 100000.0
+    cadence_s: 300
+    scale: S
+    impacts: [HF_COMM, SATCOM, SATELLITE_HEALTH]
+    status: ready
+
+  - code: KP_MAX_DAILY
+    name_zh: 每日最大 Kp（27 日展望）
+    name_en: Daily maximum Kp (27-day outlook)
+    unit: "1"
+    domain: geomag
+    valid_min: 0.0
+    valid_max: 9.0
+    cadence_s: 86400
+    scale: G
+    impacts: [ORBIT_PREDICTION]
+    status: ready
+
+  - code: KP_STORM_PROB
+    name_zh: 地磁暴機率 P(Kp≥5)
+    name_en: Probability of Kp >= 5
+    unit: "1"
+    domain: geomag
+    valid_min: 0.0
+    valid_max: 1.0
+    cadence_s: 10800
+    scale: G
+    impacts: [ORBIT_PREDICTION, GNSS_PNT, HF_COMM]
+    status: ready
+
+  # ── 電離層吸收（SWPC D-RAP，現成可用，非需外部協調）──────────────────
+  - code: DRAP_MAX_MHZ
+    name_zh: D 層吸收最高受影響頻率（全球最大）
+    name_en: D-RAP highest affected frequency, global max
+    unit: MHz
+    domain: iono
+    valid_min: 0.0
+    valid_max: 40.0
+    cadence_s: 300
+    scale: R
+    impacts: [HF_COMM]
+    status: ready
+  - code: DRAP_TW_MHZ
+    name_zh: D 層吸收最高受影響頻率（臺灣周邊）
+    name_en: D-RAP highest affected frequency, Taiwan
+    unit: MHz
+    domain: iono
+    valid_min: 0.0
+    valid_max: 40.0
+    cadence_s: 300
+    scale: R
+    impacts: [HF_COMM]
+    status: ready
+
+  # ── 電離層（新建 C2，需外部協調）──────────────────────────────────────
+  - code: TEC
+    name_zh: 電子總含量
+    name_en: Total electron content
+    unit: TECU
+    domain: iono
+    valid_min: 0.0
+    valid_max: 300.0
+    cadence_s: 900
+    impacts: [GNSS_PNT, SATCOM]
+    status: planned
+  - code: ROTI
+    name_zh: TEC 變化率指標
+    name_en: Rate of TEC index
+    unit: TECU/min
+    domain: iono
+    valid_min: 0.0
+    valid_max: 10.0
+    cadence_s: 300
+    impacts: [GNSS_PNT]
+    status: planned
+  - code: S4
+    name_zh: 振幅閃爍指數
+    name_en: S4 amplitude scintillation index
+    unit: "1"
+    domain: iono
+    valid_min: 0.0
+    valid_max: 1.5
+    cadence_s: 60
+    impacts: [GNSS_PNT, VHF_UHF, SATCOM]
+    status: planned
+  - code: FOF2
+    name_zh: F2 層臨界頻率
+    name_en: foF2
+    unit: MHz
+    domain: iono
+    valid_min: 0.0
+    valid_max: 20.0
+    cadence_s: 900
+    impacts: [HF_COMM]
+    status: planned
+
+  # ── 熱氣層與軌道（已具備 A7–A9）──────────────────────────────────────
+  - code: RHO_400
+    name_zh: 400 km 熱氣層總質量密度（MSIS 2.1）
+    name_en: Thermospheric density at 400 km
+    unit: kg/m^3
+    domain: thermo
+    valid_min: 0.0
+    valid_max: 1.0e-10
+    cadence_s: 3600
+    impacts: [ORBIT_PREDICTION]
+    status: ready
+  - code: RHO_RATIO
+    name_zh: 觀測／模型密度比值
+    name_en: Observed-to-model density ratio
+    unit: "1"
+    domain: thermo
+    valid_min: 0.0
+    valid_max: 10.0
+    cadence_s: 3600
+    impacts: [ORBIT_PREDICTION]
+    status: ready
+
+# 任務影響網域定義（事件卡 impacts[].domain 之合法值）
+impact_domains:
+  ORBIT_PREDICTION: 軌道預報與碰撞分析
+  GNSS_PNT: GNSS 定位導航授時
+  HF_COMM: HF 通信
+  VHF_UHF: VHF/UHF 通信
+  SATCOM: 衛星通信（S/X/Ka）
+  SATELLITE_HEALTH: 衛星平台與酬載健康
+
+# 任務風險等級定義（L0–L4，門檻在 configs/rules/*.yaml）
+mission_levels:
+  L0: {name: 正常, action: 例行監控}
+  L1: {name: 注意, action: 納入任務前提示}
+  L2: {name: 警戒, action: 通報相關業務單位注意}
+  L3: {name: 嚴重, action: 建議調整任務規劃或啟動備援}
+  L4: {name: 重大, action: 啟動重大事件通報與事件復盤}

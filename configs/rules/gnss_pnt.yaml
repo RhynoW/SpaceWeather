@@ -1,0 +1,68 @@
+# L0–L4 分級規則：GNSS 定位導航授時網域（架構書 §9.1）
+#
+# 本網域目前**大部分規則無資料可判**：S4／ROTI／TEC 屬架構書 C2，需與
+# TASA／中央氣象署協調取得（configs/sources.yaml 中 status=planned）。
+# 規則先寫好，資料到位即可生效——這正是「規則即設定」的用意（架構書 P8）。
+#
+# 有資料可判的只有間接指標（Kp／閃焰），先以較保守的等級呈現，
+# 並在事件卡明示「以間接指標推估、無在地閃爍實測」。
+
+domain: GNSS_PNT
+version: 2026.1-draft
+calibrated: false
+
+rules:
+  # ── 直接指標（待 C2 資料到位後生效）────────────────────────────────
+  - id: GNSS-L3-SCINT
+    name: 電離層閃爍（實測）
+    when:
+      any:
+        - {param: S4, op: ">=", value: 0.6, dwell_h: 0.25}
+        - {param: ROTI, op: ">=", value: 0.8, dwell_h: 0.25}
+    level: L3
+    hysteresis: {clear_below: 0.45, clear_dwell_h: 0.5}
+    impact: 定位精度劣化、載波失鎖風險升高；授時同步可能中斷
+    action: 改用多頻多系統接收、延後高精度作業、啟用慣性／守時備援
+    notify: [通信單位, 衛星地面站, SDA 操作席]
+    exclusions: [接收機品質, 遮蔽, 人為干擾, 欺騙, 多路徑]
+    requires_params: [S4, ROTI]        # 缺資料時本規則標為 unavailable 而非 L0
+
+  - id: GNSS-L2-TEC
+    name: TEC 異常升高
+    when:
+      any:
+        - {param: TEC, op: ">=", value: 80.0, dwell_h: 0.5}
+    level: L2
+    hysteresis: {clear_below: 60.0, clear_dwell_h: 1}
+    impact: 單頻定位電離層延遲誤差顯著增加
+    action: 單頻接收改用雙頻或加大誤差預算
+    notify: [通信單位]
+    exclusions: [接收機品質, 遮蔽, 多路徑]
+    requires_params: [TEC]
+
+  # ── 間接指標（現有資料即可判，但須標示推估性質）──────────────────
+  - id: GNSS-L1-KP5-PROXY
+    name: 地磁暴期間 GNSS 風險（間接推估）
+    when:
+      any:
+        - {param: KP_3H, op: ">=", value: 5.0, dwell_h: 0}
+    level: L1
+    hysteresis: {clear_below: 4.0, clear_dwell_h: 6}
+    impact: 地磁擾動期間電離層不規則體機率上升，定位精度可能劣化（無在地實測佐證）
+    action: 高精度 PNT 作業預留額外誤差；留意授時穩定度
+    notify: [通信單位]
+    exclusions: [接收機品質, 遮蔽, 人為干擾, 多路徑]
+    inference: proxy        # 事件卡須標示為間接推估
+
+  - id: GNSS-L2-FLARE-PROXY
+    name: 大型閃焰期間 GNSS 風險（間接推估）
+    when:
+      any:
+        - {param: XRAY_LONG, op: ">=", value: 1.0e-4, dwell_h: 0}
+    level: L2
+    hysteresis: {clear_below: 5.0e-5, clear_dwell_h: 1}
+    impact: 閃焰造成 TEC 突增（SITEC），單頻定位誤差短時上升；日照側為主
+    action: 延後高精度單頻定位作業
+    notify: [通信單位]
+    exclusions: [接收機品質, 遮蔽, 人為干擾]
+    inference: proxy

@@ -1,0 +1,63 @@
+# SWX-SDA 相依鎖定檔（直接相依 + 遞移相依的實測版本）
+# 產生環境：Python 3.13.9 / win32
+# 用途：讓 README「重現本文數字」章節的結果可在他處重現。
+# 重新產生： python tools/make_lock.py > requirements.lock
+# 非跨平臺求解結果；正式交付請改用 uv 或 pip-tools。
+
+altair==6.0.0
+attrs==25.4.0
+blinker==1.9.0
+cachetools==6.2.6
+certifi==2026.5.20
+charset-normalizer==3.4.4
+click==8.3.1
+colorama==0.4.6
+duckdb==1.5.1
+Flask==3.1.3
+flask-cors==6.0.5
+gitdb==4.0.12
+GitPython==3.1.46
+idna==3.11
+iniconfig==2.3.0
+itsdangerous==2.2.0
+Jinja2==3.1.6
+joblib==1.5.3
+jsonschema==4.25.1
+jsonschema-specifications==2025.9.1
+MarkupSafe==3.0.3
+narwhals==2.16.0
+numpy==2.5.0
+packaging==26.2
+pandas==2.2.3
+pillow==12.2.0
+plotly==6.5.2
+pluggy==1.6.0
+ppigrf==2.1.0
+protobuf==7.35.1
+pyarrow==22.0.0
+pydeck==0.9.1
+Pygments==2.19.2
+pymsis==0.12.0
+pytest==9.0.3
+python-dateutil==2.9.0.post0
+pytz==2022.7.1
+PyYAML==6.0.3
+referencing==0.37.0
+requests==2.32.5
+rpds-py==0.27.1
+scikit-learn==1.8.0
+scipy==1.16.3
+six==1.17.0
+smmap==5.0.2
+streamlit==1.54.0
+tenacity==8.5.0
+threadpoolctl==3.6.0
+toml==0.10.2
+tornado==6.5.2
+typing_extensions==4.15.0
+tzdata==2026.2
+urllib3==2.7.0
+watchdog==6.0.0
+Werkzeug==3.1.8
+
+# 未安裝於產生環境（選用相依）：exceptiongroup, importlib-metadata, tomli

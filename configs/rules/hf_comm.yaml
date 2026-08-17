@@ -1,0 +1,128 @@
+# L0–L4 分級規則：HF 通信網域（架構書 §9.1、§9.3）
+#
+# 主導機制為**太陽閃焰**造成的電離層 D 層吸收（無線電黑障）：
+# 閃焰的軟 X 射線（0.1–0.8 nm）游離 D 層，使 HF 訊號被吸收而非反射。
+#
+# 時效特性（架構上必須誠實呈現）：
+#   X 射線以光速抵達，約 8 分 20 秒，**沒有預警空間**。本網域的 L1–L4 是
+#   「即時偵測 + 影響評估」，不是預報。可提前的只有 M_FLARE_PROB / X_FLARE_PROB
+#   這類活動區統計機率（見 pre_alert 規則），且僅為機率而非確定性預警。
+#
+# 影響範圍限日照側；夜側 HF 不受閃焰直接影響——這點在事件卡的 affected_region
+# 必須標明，否則會造成不必要的全域告警。
+#
+# 門檻直接採 NOAA R 級（國際通用，無須自行發明），對應關係見 swx_core.flare。
+
+domain: HF_COMM
+version: 2026.1-draft
+calibrated: false
+
+rules:
+  - id: HF-L1-R1
+    name: 無線電黑障 R1（M1 級閃焰）
+    when:
+      any:
+        - {param: XRAY_LONG, op: ">=", value: 1.0e-5, dwell_h: 0}
+        - {param: FLARE_PEAK, op: ">=", value: 1.0e-5, dwell_h: 0}
+    level: L1
+    hysteresis: {clear_below: 5.0e-6, clear_dwell_h: 1}
+    scale_hint: R1
+    region: 日照側
+    impact: 日照側 HF 短暫衰減，低頻端偶有失聯；影響約持續數十分鐘
+    action: 納入任務前提示；HF 通聯改用較高頻段或改期
+    notify: [通信單位]
+    exclusions: [設備功率, 天線, 頻率規劃, 日夜變化]
+
+  - id: HF-L2-R2
+    name: 無線電黑障 R2（M5 級閃焰）
+    when:
+      any:
+        - {param: XRAY_LONG, op: ">=", value: 5.0e-5, dwell_h: 0}
+        - {param: FLARE_PEAK, op: ">=", value: 5.0e-5, dwell_h: 0}
+    level: L2
+    hysteresis: {clear_below: 1.0e-5, clear_dwell_h: 1}
+    scale_hint: R2
+    region: 日照側
+    impact: 日照側 HF 部分頻段中斷約數十分鐘，低頻導航訊號短暫降級
+    action: 通報通信與地面站；HF 任務改採備援通聯方式
+    notify: [通信單位, 衛星地面站]
+    exclusions: [設備功率, 天線, 頻率規劃, 人為干擾]
+
+  - id: HF-L3-R3
+    name: 無線電黑障 R3（X1 級閃焰）
+    when:
+      any:
+        - {param: XRAY_LONG, op: ">=", value: 1.0e-4, dwell_h: 0}
+        - {param: FLARE_PEAK, op: ">=", value: 1.0e-4, dwell_h: 0}
+    level: L3
+    hysteresis: {clear_below: 5.0e-5, clear_dwell_h: 2}
+    scale_hint: R3
+    region: 日照側
+    impact: 日照側 HF 大範圍中斷約一小時，低頻導航誤差增加
+    action: |
+      建議調整任務規劃或啟動備援通信；
+      通知 PNT 依賴任務注意低頻導航誤差；留意後續是否伴隨 SEP 與地磁暴。
+    notify: [通信單位, 衛星地面站, 太空發展科]
+    exclusions: [設備功率, 天線, 頻率規劃, 人為干擾]
+
+  - id: HF-L4-R4
+    name: 無線電黑障 R4–R5（X10 級以上閃焰）
+    when:
+      any:
+        - {param: XRAY_LONG, op: ">=", value: 1.0e-3, dwell_h: 0}
+        - {param: FLARE_PEAK, op: ">=", value: 1.0e-3, dwell_h: 0}
+    level: L4
+    hysteresis: {clear_below: 1.0e-4, clear_dwell_h: 3}
+    scale_hint: R4
+    region: 日照側
+    impact: 日照側 HF 中斷一至二小時以上，衛星導航與低頻導航明顯降級
+    action: |
+      啟動重大事件通報與事件復盤；HF 任務全面改採備援；
+      評估是否伴隨太陽質子事件（SEP）與後續地磁暴，預先提示軌道預報風險。
+    notify: [通信單位, 衛星地面站, 太空發展科, 指揮鏈]
+    exclusions: [設備功率, 天線, 頻率規劃, 人為干擾]
+
+  # ── 太陽質子事件（S 級）：極區 HF 吸收，持續數小時至數日 ──────────────
+  - id: HF-L2-S1
+    name: 太陽輻射風暴 S1
+    when:
+      any:
+        - {param: PROT10, op: ">=", value: 10.0, dwell_h: 0}
+    level: L2
+    hysteresis: {clear_below: 5.0, clear_dwell_h: 6}
+    scale_hint: S1
+    region: 極區
+    impact: 極蓋吸收（PCA）造成高緯 HF 衰減，可持續數小時至數日
+    action: 高緯度路徑 HF 改採備援；注意衛星單粒子翻轉風險
+    notify: [通信單位, 衛星操作單位]
+    exclusions: [設備, 極區路徑幾何]
+
+  - id: HF-L3-S3
+    name: 太陽輻射風暴 S3 以上
+    when:
+      any:
+        - {param: PROT10, op: ">=", value: 1000.0, dwell_h: 0}
+    level: L3
+    hysteresis: {clear_below: 100.0, clear_dwell_h: 12}
+    scale_hint: S3
+    region: 極區
+    impact: 極區 HF 大範圍中斷；衛星酬載單粒子事件與太陽能板衰減風險上升
+    action: 高緯任務改期或改採衛星通信；通報衛星操作單位注意酬載異常
+    notify: [通信單位, 衛星操作單位, 太空發展科]
+    exclusions: [設備, 極區路徑幾何]
+
+# ── 提前提示（非確定性預警）────────────────────────────────────────────
+# 閃焰無法提前偵測，但活動區的統計機率可以提前給提示。
+# 這類規則只產生 L1（注意），不得升級為 L2 以上，避免把機率當成事件。
+pre_alert_rules:
+  - id: HF-PRE-XPROB
+    name: X 級閃焰機率偏高
+    when:
+      any:
+        - {param: X_FLARE_PROB, op: ">=", value: 0.30, dwell_h: 0}
+    level: L1
+    hysteresis: {clear_below: 0.15, clear_dwell_h: 24}
+    impact: 未來 24 小時 X 級閃焰機率偏高，HF 中斷風險上升（機率性提示，非事件）
+    action: 重要 HF 任務預先規劃備援頻段與通聯方式
+    notify: [通信單位]
+    exclusions: []

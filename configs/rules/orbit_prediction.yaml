@@ -1,0 +1,74 @@
+# L0–L4 分級規則：軌道預報網域（架構書 §9.1）
+#
+# 這是全案唯一「既有能力已可支撐」的網域：地磁擾動 → 熱氣層密度上升 → 阻力增加
+# → 低軌軌道預報誤差上升。門檻以 Kp/Ap 為主，未來接上 RHO_RATIO 觀測反演後
+# 可改以「實測密度比值」為主判據（見 §7.1）。
+#
+# 門檻現況為**初版建議值**，須與需求單位以 tools/whatif_threshold.py 校準後定版
+# （構想書 TRL 表已將此列為風險：避免過度告警或漏報）。
+
+domain: ORBIT_PREDICTION
+version: 2026.1-draft
+calibrated: false          # 尚未與需求單位校準；定版後改 true 並記錄日期
+
+rules:
+  - id: ORB-L1-KP4
+    name: 地磁活動轉強
+    when:
+      any:
+        - {param: KP_3H, op: ">=", value: 4.0, dwell_h: 0}
+    level: L1
+    hysteresis: {clear_below: 3.0, clear_dwell_h: 6}
+    scale_hint: G1
+    impact: 熱氣層密度略升，低軌軌道預報誤差可能小幅增加
+    action: 納入任務前提示；低軌目標維持既有更新頻率
+    notify: [SDA 操作席]
+    exclusions: []
+
+  - id: ORB-L2-KP5
+    name: 地磁暴（G1–G2）
+    when:
+      any:
+        - {param: KP_3H, op: ">=", value: 5.0, dwell_h: 0}
+        - {param: AP_AVG, op: ">=", value: 40.0, dwell_h: 0}
+    level: L2
+    hysteresis: {clear_below: {KP_3H: 4.0, AP_AVG: 30.0}, clear_dwell_h: 6}
+    scale_hint: G1
+    impact: 熱氣層密度上升、低軌大氣阻力增加，軌道預報誤差擴大
+    action: 通報衛星操作與 SDA 席；低軌目標軌道預報改以 6 小時更新
+    notify: [SDA 操作席, 衛星操作單位]
+    exclusions: [機動, TLE 缺口外推]
+
+  - id: ORB-L3-KP6
+    name: 強地磁暴（G3）
+    when:
+      any:
+        - {param: KP_3H, op: ">=", value: 6.0, dwell_h: 0}
+        - {param: AP_AVG, op: ">=", value: 80.0, dwell_h: 0}
+    level: L3
+    hysteresis: {clear_below: {KP_3H: 5.0, AP_AVG: 60.0}, clear_dwell_h: 9}
+    scale_hint: G3
+    impact: 低軌大氣阻力顯著增加，軌道衰減加速；接近事件與碰撞分析可信度下降
+    action: |
+      建議調整任務規劃；低軌目標改用密度修正後之軌道傳播；
+      交會分析結果須標註環境不確定度；檢視是否有目標出現異常衰減。
+    notify: [SDA 操作席, 衛星操作單位, 太空發展科]
+    exclusions: [機動, TLE 缺口外推, 自然再入]
+
+  - id: ORB-L4-KP8
+    name: 極端地磁暴（G4–G5）
+    when:
+      any:
+        - {param: KP_3H, op: ">=", value: 8.0, dwell_h: 0}
+        - {param: AP_AVG, op: ">=", value: 200.0, dwell_h: 0}
+    level: L4
+    hysteresis: {clear_below: {KP_3H: 6.0, AP_AVG: 150.0}, clear_dwell_h: 12}
+    scale_hint: G4
+    impact: |
+      熱氣層密度可能倍增（2024-05 Gannon 事件於 400 km 達約 2 倍），
+      低軌衛星軌道預報誤差急遽上升，新發射與初始入軌風險顯著提高。
+    action: |
+      啟動重大事件通報與事件復盤；低軌軌道預報一律套用密度修正因子；
+      暫緩非必要之低軌交會判定結論；追蹤異常衰減目標清單。
+    notify: [SDA 操作席, 衛星操作單位, 太空發展科, 指揮鏈]
+    exclusions: [機動, TLE 缺口外推, 自然再入]

@@ -1,0 +1,607 @@
+# SWX-SDA　太空天氣整合資訊與 SDA 應用系統
+
+> 對應計畫：**太空天氣整合資訊與 SDA 應用模型建構研究**（117–118 年）
+
+把分散的國內外太空天氣觀測，轉成任務單位可判讀（L0–L4）、可通報（事件卡）、
+可介接（API／圖層）、可計算（STK/HPOP 大氣阻力參數）的四類產品。
+
+**定位**：不重建國家級預報中心，而是建立「任務化轉譯層」。
+
+| 文件 | 內容 |
+|---|---|
+| [docs/architecture.md](docs/architecture.md) | 系統架構、設計原則、與構想書七大議題的對應 |
+| [docs/data_sources_c2c3.md](docs/data_sources_c2c3.md) | 地磁與電離層資料源盤查（C2/C3 風險分級之修正） |
+| [docs/forecast_verification.md](docs/forecast_verification.md) | 預報引擎驗證報告（切分明細、列聯表、未達 KPI 之落差） |
+| [docs/density_model_validation.md](docs/density_model_validation.md) | 大氣密度模型配置、修正因子定義與驗證邊界 |
+| [docs/glossary.md](docs/glossary.md) | **名詞說明與參數判讀**（教育推廣、值勤判讀、常見誤讀） |
+| [docs/research_review.md](docs/research_review.md) | **依公開學術研究的強化檢視**（文獻對照、建議順序） |
+
+### 分級術語
+
+系統中有兩套獨立的分級，**不可互相換算**：
+
+| 標記 | 定義 | 由誰決定 |
+|---|---|---|
+| **L0–L4** | 本系統的**任務風險等級**（正常／注意／警戒／嚴重／重大） | 本案自訂，門檻在 `configs/rules/*.yaml`，須與需求單位校準 |
+| G1–G5 | NOAA 地磁暴強度分級 | 國際標準，依 **Kp**（G1=Kp5…G5=Kp9） |
+| R1–R5 | NOAA 無線電衰減分級 | 國際標準，依 **GOES 0.1–0.8 nm X 射線峰值通量**（R1=M1、R3=X1） |
+| S1–S5 | NOAA 太陽輻射風暴分級 | 國際標準，依 **≥10 MeV 質子通量**（S1=10 pfu，每級 ×10） |
+
+這兩套分級在事件卡 JSON 中是**兩個獨立欄位**：
+
+| 欄位 | 內容 |
+|---|---|
+| `mission_level` | 本系統自訂的任務風險等級，值域 `L0`–`L4` |
+| `international_scale` | NOAA 尺度，例如 `G4`、`R3`、`S1`；未達門檻時為 `null` |
+| `impacts[].inference` | `proxy` 表示該分項為間接推估；`null` 表示**未標記為推估**，不保證代表直接觀測 |
+| `status` | 事件卡狀態機：`draft`（待人工確認）→ `issued`（已發布）→ `superseded`（已被新修訂取代） |
+
+文中出現的「L3／G3」是**兩個欄位並列**，不代表等價——
+`mission_level` 是任務影響判斷，`international_scale` 是 NOAA 定義的環境事件
+強度尺度，不等同於任務影響。同一場事件的兩者可以不同步。
+
+架構分層另以名稱表示（擷取層、資料層、模型層、預報層、風險層、產品層、展示層），
+不使用 L 編號，以免與任務風險等級混淆。
+
+---
+
+## 快速開始
+
+```bash
+pip install -r requirements.txt
+
+# 1. 資料源盤點與首次擷取
+python -m services.ingest.run --list                    # 先看有哪些來源
+python -m services.ingest.run --source all --backfill   # 首次：回填歷史（約 1 分鐘）
+python -m services.ingest.run --source omni2_hourly --years 6   # 預報引擎的訓練資料
+
+# 2. 端到端演練：資料 → 分級 → 事件卡 → STK 檔 → 密度修正因子
+python tools/e2e_demo.py                        # 預設 2024-05 Gannon G5 事件
+
+# 3. 儀表板
+streamlit run apps/dashboard/app.py             # http://localhost:8501
+
+# 4. API 與測試
+python -m services.api.app                      # http://127.0.0.1:5100
+python -m pytest tests -q
+```
+
+### 前提條件
+
+上述快速開始流程（安裝、資料擷取、端到端演練、儀表板、API 與測試）
+可在**不設定環境變數、不使用外部帳號、不具備 STK 授權**的情況下完整執行，
+但**需要對外 HTTPS 連線**（CelesTrak、SWPC、GFZ、Kyoto、NASA SPDF）。
+
+封閉網路環境加 `--offline` 改讀 `data/seed/` 的本地檔，此時只有種子資料涵蓋的
+參數可用，其餘來源會回報失敗而非靜默略過。例行擷取不加 `--backfill`
+（理由見下方「雙時間軸儲存」）。
+
+### 執行環境
+
+| 項目 | 值 |
+|---|---|
+| Python | 3.11+（開發與驗證於 3.13.9） |
+| 作業系統 | Windows／Linux／WSL2（開發於 Windows 11） |
+| 時間基準 | 全系統一律 UTC，無例外 |
+| 外部授權 | 無。STK 僅在後續階段的實際介接驗證時需要 |
+| 主要相依 | duckdb 1.5、pandas 2.2、pyarrow 22、pymsis 0.12（MSIS 2.1）、ppigrf 2.1、scikit-learn 1.8、Flask 3.1、Streamlit 1.54 |
+
+上表為**開發與驗證所用的環境版本，不代表已測試過的相容範圍**——
+其他版本可能可用，但未經驗證。`requirements.txt` 只給下限；
+`requirements.lock` 提供本案相依樹的實測版本（55 個套件），
+以 `python tools/make_lock.py` 重新產生。
+
+```bash
+pip install -r requirements.lock   # 重現本文數字時使用
+```
+
+`requirements.lock` **不是跨平臺求解的結果**（不同於 uv／pip-tools 的 lock），
+只是產生環境的實測版本快照；亦尚未在 CI 上固定版本。
+
+---
+
+## 目前狀態
+
+| 層 | 模組 | 狀態 |
+|---|---|---|
+| 擷取層 | `services/ingest` | ✅ 19 個來源（16 個可運作）：CelesTrak、GFZ ×2、SWPC ×8、Kyoto、NASA OMNI2 |
+| 資料層 | `packages/swx_core` | ✅ 雙時間軸 Parquet + DuckDB、品質三級制、44 個註冊參數 |
+| 模型層 | `packages/orbit_drag`、`packages/geomag` | ✅ 熱氣層密度／阻力（MSIS 2.1，暴時 ap 模式）＋地磁基準場（IGRF-14）；電離層 D 層吸收已接 |
+| 預報層 | `services/forecast` | ⚠️ 1–48 小時 Kp 預報＋驗證擂台。**僅 1–12h 建議參考，24h 以上為研究階段** |
+| 風險層 | `services/risk_engine` | ✅ 3 網域 15 條規則、事件卡、作業狀態庫 |
+| 產品層 | `services/exporter` | ✅ STK/GMAT CSSI 驅動檔、密度修正因子表 |
+| 展示層 | `services/api`、`apps/dashboard` | ✅ REST API（13 端點）＋ Streamlit 儀表板（10 頁，含教育推廣頁） |
+
+### 實作狀態 ≠ 驗證狀態
+
+「已實作」與「已在目標工具上驗證」是兩件事，分開列：
+
+| 模組 | 成熟度 | 已完成的驗證 | 主要限制 | 證據 |
+|---|---|---|---|---|
+| CSSI 驅動檔匯出 | 格式已驗證 | 對 CelesTrak 實檔逐行比對，排除當日更新列後 2,054/2,054 一致 | STK 實際載入未驗證 | `tests/test_contracts.py` |
+| 密度修正因子 | 原型 | 單元測試、前視洩漏檢查、基準污染檢查 | 未與精密星曆反演密度交叉校準 | `tests/test_density.py` |
+| D-RAP 介接 | 已介接 | 解析與臺灣取樣 | 未與在地 HF 通聯實測校準 | `services/ingest/forecast_sources.py` |
+| L0–L4 分級 | 原型 | 駐留、遲滯、可用性行為測試 | 門檻未與需求單位校準（`calibrated: false`） | `tests/test_risk_engine.py` |
+| 48 小時預報 | 研究階段 | 4 折滾動起報回測、基線比較 | 未達 KPI；未與 NOAA 官方預報同場比較 | `docs/forecast_verification.md` |
+| IGRF 基準場 | 已完成 | **值域合理性檢查**（F/D/I 落在臺灣公認範圍、磁傾角隨緯度單調遞增） | **未與任一測站實測序列逐點比對**；區域擾動仍為推估 | `tests/test_geomag.py` |
+
+「成熟度」用語：`已完成` = 功能與驗證皆到位；`格式已驗證` = 對規格正確，
+但未在目標工具上實測；`已介接` = 資料通了，尚未做效果校準；
+`原型` = 可運作但參數未校準；`研究階段` = 未達可作業水準。
+
+**尚未建置**：區域地磁擾動的在地實測（需磁力計串流）、電離層閃爍實測
+（S4/ROTI/TEC，需外部協調）、多頻段影響矩陣的實證校準、STK 端實際介接驗證。
+
+分級規則涵蓋 `ORBIT_PREDICTION`、`HF_COMM`、`GNSS_PNT` 三個網域。
+GNSS 的直接判據（S4/ROTI/TEC）尚無資料源，規則已寫好並回報 `unavailable`——
+系統刻意把「沒資料」與「沒事」分開，不會顯示綠燈誤導判讀。
+
+---
+
+## 目錄結構
+
+```
+configs/               設定即契約
+  params.yaml            參數字典（UI 標籤、API 說明、品質值域皆由此生成）
+  sources.yaml           資料源盤點（議題一交付物的機器可讀版）
+  rules/*.yaml           L0–L4 分級門檻
+packages/
+  swx_core/              資料契約、參數字典、品質管線、雙時間軸資料層、
+                         CSSI 格式、閃焰分級、參數判讀指引（interpret.py）
+  orbit_drag/            熱氣層密度與大氣阻力（自 Sat_TraingDataExtension 移入，
+                         該目錄名為上游倉庫的實際拼法，非本文件誤植）
+  geomag/                地磁參考場 IGRF-14 與區域擾動框架（議題二）
+  SOURCE_MAP.md          移入模組的來源與改動記錄
+services/
+  ingest/                各來源介接器（設定驅動）
+  forecast/              1–48 小時預報引擎與驗證擂台
+  risk_engine/           分級規則引擎與事件卡
+  exporter/              STK CSSI 檔、密度修正因子
+  api/                   Flask REST API
+apps/dashboard/          Streamlit 儀表板
+tools/
+  e2e_demo.py            端到端鏈路演練
+  whatif_threshold.py    門檻校準模擬
+  cssi_compare.py        CSSI 匯出與來源實檔的逐行比對（可稽核）
+  density_cross_check.py MSIS 2.1 vs NRLMSISE-00 同條件交叉比對
+  make_lock.py           產生 requirements.lock
+tests/                   契約測試、規則引擎、地磁、密度測試
+docs/                    架構書、資料源盤查、驗證報告
+data/                    執行時產生（已 gitignore）
+  swx_parquet/{參數}/{期間}/   觀測分區（cadence ≥1h 年分區，否則月分區）
+  raw/{來源}/{年}/{月}/{日}/   原始落地（解析錯誤可重跑，不需重抓）
+  seed/                        離線種子資料
+  exports/                     STK 檔、修正因子、事件卡
+  swx_ops.sqlite               事件卡與稽核紀錄
+```
+
+---
+
+## 幾個設計決定
+
+### 雙時間軸儲存
+
+每筆資料同時記 `valid_time`（物理時間）與 `ingest_time`（入庫時間）。
+沒有這個，歷史事件回放會用到事後訂正值，預報命中率會虛高而無法交代。
+
+```python
+store.query("DST", as_of="2024-05-10T18:00Z")   # 只看「當時已知」的資料
+```
+
+回填歷史資料時要注意：若一律標成「今天入庫」，回放到 2024 年會查不到任何東西
+（語意上正確——我們當年確實沒有這筆資料，但議題七的回放就無從進行）。
+`--backfill` 會以各來源的 `publication_lag_s` 重建「當時可取得性」。
+這是**近似**，須在驗證報告中載明。首次建庫用 `--backfill`，之後例行擷取不加。
+
+效果實例——回放到 Gannon 事件起始時刻，系統只知道 Ap=105，因此發出 **L3/G3**，
+而不是事後才確定的 L4/G4：
+
+```
+$ python tools/e2e_demo.py --as-of 2024-05-11T00:00Z
+SWX-20240510T0000-GS　GEOMAGNETIC_STORM　等級 L3（國際 G3）
+```
+
+### 擷取與服務讀寫分離
+
+DuckDB 是單寫入者模型；擷取端只寫 Parquet 分區，服務端唯讀查詢，兩者不互卡。
+
+### 規則即設定
+
+L0–L4 門檻寫在 YAML，需求單位調整門檻不需改程式，並可當場回答
+「這組門檻過去五年會發幾次警報」：
+
+```
+$ python tools/whatif_threshold.py --rule ORB-L3-KP6 --param KP_3H --sweep 5,6,7,8
+ threshold  n_alerts  per_year  duty_cycle_pct  max_h
+       5.0       170      30.2            7.39   96.0
+       6.0        59      10.5            2.79   78.0
+       7.0        25       4.4            1.42   78.0
+       8.0        11       2.0            0.92   78.0
+```
+
+構想書的 TRL 表把「門檻須與需求單位共同校準，避免過度告警或漏報」列為風險，
+這張表就是化解該風險的具體手段。儀表板「門檻校準」頁提供同樣功能的互動版。
+
+### CSSI 格式單一實作
+
+讀進來與寫出去給 STK 的是同一組欄位定義（`swx_core/cssi.py`）。
+對 CelesTrak 實檔比對：**2,278/2,279 行一致**，唯一差異是**當日仍在更新的觀測列**
+（來源在快照後又修訂了該日 Kp）；排除當日後為 **2,054/2,054 完全一致**，
+三個區段的配置亦相符。欄位位置另對 GMAT `SolarFluxReader.cpp` 的
+`substr(92)` 交叉驗證。
+
+### 預報技巧照實呈現
+
+驗證擂台以滾動起報回測，ML 模型必須贏過持續性、氣候平均、27 日復現三個基線才准上線。
+
+**評估設定**：目標 Kp（3 小時解析度）｜訓練資料 2021-01 起（OMNI2 回填 6 年＝2021–2026）｜
+滾動起報 4 折、訓練集永遠早於測試集並留 7 天 gap｜
+**每折測試樣本 3,360 筆，四折合計 13,440 筆**（下表 MAE 為合計值上的統計）｜
+改善率定義為 `1 − MAE_模型 ÷ MAE_基線`｜MAE 附 bootstrap 95% CI。
+各折的訓練／測試期間明細見
+[docs/forecast_verification.md](docs/forecast_verification.md)（README 只列合計樣本數）。
+
+| horizon | 最佳模型 | MAE | 95% CI | 最佳基線 | 基線 MAE | 改善 |
+|---|---|---|---|---|---|---|
+| 3h | gbm | 0.624 | 0.616–0.633 | persistence | 0.675 | +7.6% |
+| 6h | gbm | 0.809 | 0.798–0.820 | persistence | 0.874 | +7.4% |
+| 12h | gbm | 0.968 | 0.955–0.981 | persistence | 1.048 | +7.6% |
+| 24h | gbm | 1.051 | 1.037–1.066 | climatology | 1.070 | +1.8% |
+| **48h** | **climatology** | **1.068** | 1.054–1.084 | — | — | **ML 未勝出** |
+
+**事件型指標的定義**（不附定義的 POD/FAR 無法複核）：
+
+- 事件：**Kp ≥ 5**（G1 以上），基率約 3%
+- 判定：於目標時刻**逐點比對**，未設 ±時間容差窗（比容差版嚴格）
+- POD = 命中數 ÷ 實際事件數；FAR = 誤報數 ÷ 所有發報數
+- 機率門檻在**訓練折**上選（預設最大化 CSI），不得用測試折挑門檻
+
+實測（4 折滾動起報，門檻取訓練折 CSI 最佳）：
+
+事件基率僅約 3%，離開列聯表無法判斷 POD/FAR 是穩定結果還是小樣本波動，故一併列出
+（以下為 GBM 於四折合計測試集上的實測值，操作點取訓練折 CSI 最佳）：
+
+| horizon | 命中 | 誤報 | 漏報 | 正確否定 | POD | FAR | BSS | POD（訓練折） |
+|---|---|---|---|---|---|---|---|---|
+| 3h | 179 | 133 | 290 | 12,838 | 0.382 | 0.426 | 0.278 | 0.833 |
+| 6h | 81 | 86 | 388 | 12,885 | 0.173 | 0.515 | 0.117 | 0.858 |
+| 12h | 27 | 40 | 442 | 12,931 | 0.058 | 0.597 | 0.028 | 0.832 |
+| 24h | 7 | 36 | 461 | 12,936 | 0.015 | 0.837 | −0.017 | 0.839 |
+| 48h | 10 | 87 | 458 | 12,885 | 0.021 | 0.897 | −0.022 | 0.833 |
+
+驗證表另輸出 **TSS**（True Skill Statistic = POD − POFD）與 balanced accuracy。
+事件基率僅約 3%、正確否定達一萬餘筆，HSS 會被這批「猜沒事就對」的樣本稀釋，
+TSS 不受基率影響，是稀有事件評估的社群標準指標
+（3h TSS 0.371、24h 僅 0.012，衰減比 HSS 呈現得更清楚）。
+
+**均未達構想書的 POD ≥ 0.7、FAR ≤ 0.4。** 三點須一併說明：
+
+1. **24 小時以上僅 7–10 次命中**，該列的 POD/FAR 已屬小樣本統計，不宜單獨引用。
+2. **24 小時起 BSS 轉負**，代表該 horizon 的機率產品不優於「永遠報氣候頻率」。
+3. **訓練折 POD 穩定在 0.83 左右，測試折卻從 0.38 掉到 0.02**——
+   這個落差在所有 horizon 上都存在，是分類器過擬合的明確訊號，
+   而非單純的 horizon 效應。改善方向應包含正則化與機率校準，
+   不只是換模型或加特徵。
+
+`--objective pod` 可把訓練折 POD 推到 0.728，但測試折只有 0.064；
+程式會主動印出這個轉移落差，不讓訓練折的達標被誤讀為滿足 KPI。
+
+**這個形狀與國際文獻一致，不是本專案的實作缺陷。**
+地磁暴預報綜述指出：超過約 3 小時的中期預報準確度急遽衰退，
+NOAA 的 24 小時機率預報亦僅達約 50% 水準。
+本專案 3/6/12h 勝過持續性、24h 微幅勝出、48h 未勝出的形狀正是文獻描述的形狀。
+→ 這意味「48 小時 POD ≥ 0.7」以目前國際水準衡量並不現實，
+應以文獻為據重新協商該項 KPI，而非繼續調參試圖達標。
+文獻對照與建議的強化順序見
+[docs/research_review.md](docs/research_review.md)。
+
+### 密度修正因子（摘要）
+
+模型為 **MSIS 2.1**（`pymsis` 0.12），採**暴時 ap 模式**。修正因子定義為
+同時刻、同地點、同高度、同 F10.7 下，地磁輸入由寧靜換成實際值的密度比：
+
+```
+storm_ratio = ρ(實際 ap 歷史) ÷ ρ(寧靜基準)
+```
+
+**寧靜基準的精確定義**：同一時刻／地點／高度／F10.7 下，把地磁輸入換成寧靜值——
+**日均 Ap 設為 4，且 7 元素 ap 歷史「全部」設為 4**。
+只換日均值而留著真實 ap 歷史的話，暴時模式下基準與擾動態會變成同一件事、
+比值恆為 1——這個錯誤發生過且不易察覺，故寫進交付 metadata
+（`drag_correction.product_metadata()`）而非僅寫在註解。
+
+**數值的適用範圍**：以下為 2024-05-08→14 期間、
+於**固定參考點 lat 0°／lon 0°**、每 3 小時取樣、各高度帶取**該期間最大值**：
+300–400 km **2.24×**、400–500 km **2.90×**、500–600 km **3.67×**。
+**這不是全球最大值，也不是任一地點的定值**——經緯度固定是刻意的
+（常數偏差會被等效彈道係數吸收，逐點求真實座標不改善相對變化的準確度）。
+
+**`storm_ratio` 是模型內部的相對比較量，不是由觀測反演得到的密度校正係數。**
+
+在取得實測反演密度之前，以**換模型**取得模型分歧的量級：同條件下
+MSIS 2.1 與 NRLMSISE-00 的峰值密度相差 **7.3–8.8%**（350／450／550 km）。
+這是**模型間分歧而非誤差**——兩者可能同向偏離實測——但它給出誤差的下界，
+且與文獻記載的 HASDM 誤差 6–8% 同量級。重現：`python tools/density_cross_check.py`。
+完整模型配置、暴時 ap 模式的實測影響（含前視洩漏修正）與驗證邊界見
+[docs/density_model_validation.md](docs/density_model_validation.md)。
+
+### 太陽閃焰的時效性
+
+X 射線以光速抵達（約 8 分 20 秒），**沒有預警空間**。
+HF 網域的閃焰相關等級可能由 L1 起跳，且屬「即時偵測 + 影響評估」而非預報——
+**不宣稱具備事件發生前的預警能力**。
+（`L0` 表示未觸發該網域規則，**不代表所有必要資料都可用**；
+資料缺漏時規則回報 `unavailable` 而非 L0。）
+能提前的只有活動區的 M/X 級閃焰機率，且僅產生 L1 提示，
+測試會擋住任何把它升級為事件等級的改動。
+
+### 地磁基準場與推估的區別
+
+IGRF-14 基準場離線可算，不需外部資料（臺灣代表點 F≈45,007 nT、D≈−4.6°、I≈35.1°）。
+**這些值目前只通過值域合理性檢查**——測試斷言 F 落在 43,000–47,000 nT、
+磁傾角落在 30–42°、且磁傾角隨緯度單調遞增。**尚未取得任何測站的實測序列做逐點比對**，
+因此不可稱為「已與實測驗證」。取得 LNP 觀測資料後才能做正式驗證。
+區域擾動 ΔH 則需在地磁力計實測；在此之前只有推估值，**一律標 `is_proxy=True`**，
+有專門的測試守這個旗標。
+
+附帶一提：臺灣地理緯度 23.5°N，但**地磁緯度僅約 19°N**，正落在赤道異常駝峰區——
+電離層現象依地磁緯度分布，用地理緯度判斷會系統性失準。
+
+---
+
+## 教育與推廣
+
+太空天氣的判讀門檻高，而**誤讀的代價與看不懂一樣大**。
+系統因此把「怎麼看懂這些數字」當成一項產品，而非附屬說明：
+
+| 素材 | 內容 | 適用場合 |
+|---|---|---|
+| [docs/glossary.md](docs/glossary.md) | 名詞說明、參數判讀速查、**常見誤讀** | 簡報講義、新進人員自習 |
+| 儀表板「名詞與判讀」頁 | 因果鏈圖解、各參數現值落在哪一區、逐項說明與門檻線 | 現場展示、值勤輔助 |
+| `packages/swx_core/interpret.py` | 判讀指引的程式化版本（17 個參數） | 供 API／其他介面重用 |
+
+三份素材共用同一組判讀基準，改一處即同步。
+
+**判讀門檻與告警門檻刻意分開**：
+`interpret.py` 的「值得注意／警戒」是**科普教學用的一般性參考**，
+取自公開文獻與 NOAA 尺度；系統實際發 L0–L4 的門檻在 `configs/rules/*.yaml`，
+須與需求單位校準。兩者混為一談的話，一次科普簡報就可能反過來污染作業標準。
+
+推廣時最該講的三件事（完整清單見 glossary）：
+
+1. **三種擾動的抵達時間差三個數量級**——X 射線 8 分鐘、質子數十分鐘、CME 1–3 天。
+   「閃焰預警」與「地磁暴預警」的難度天差地遠。
+2. **臺灣不是低風險區**——地磁緯度僅約 19°N，位於赤道異常駝峰，
+   是全球電離層最劇烈的地帶之一。用地理緯度判斷會系統性低估。
+3. **沒有告警 ≠ 安全**——規則回報 `unavailable` 代表判定所需資料不存在。
+   儀表板對此顯示灰色而非綠燈。
+
+---
+
+## 限制與非目標
+
+明確劃出系統**不做**什麼，比列出做了什麼更能降低誤用風險：
+
+- **不是國家級太空天氣預報中心**，不取代中央氣象署太空天氣作業辦公室。
+- **不提供未經驗證的區域即時實測**：臺灣周邊地磁擾動目前只有推估值，
+  一律標 `is_proxy=True`。
+- **不把推估值呈現為觀測值**：事件卡的 `inference: proxy` 與
+  `is_proxy` 旗標都會傳遞到 API 與儀表板。
+- **不保證 STK/HPOP 與本系統的密度結果一致**：CSSI 驅動檔的格式已驗證，
+  但 STK 端的實際載入與傳播結果尚未做交叉比對。
+- **不對 GNSS 閃爍風險提供實測判定**：S4/ROTI/TEC 尚無資料源，
+  相關規則回報 `unavailable` 而非 L0。
+- **不把 24 小時以上的預報列為作業性產品**：訓練折 POD 約 0.83、測試折僅 0.38–0.02，
+  過擬合落差在**所有 horizon** 上都存在；24h 起 BSS 轉負、48h 未通過基線門檻。
+  此告誡不只寫在文件——儀表板預報頁顯示紅色警示，`/v1/obs` 回應含本系統預報時
+  帶 `advisory.code = "RESEARCH_GRADE_FORECAST"`，呼叫端讀 JSON 就看得到。
+- **不宣稱地磁基準場已與實測驗證**：IGRF 目前只通過值域合理性檢查，
+  尚未與任何測站的實測序列逐點比對。
+- **不產生行動命令**：系統輸出的是風險等級與建議處置，
+  L3 以上須經人工確認後發布，任務層級的決策由值勤人員做。
+
+---
+
+## 資料來源
+
+| 來源 | 提供 | 狀態 |
+|---|---|---|
+| CelesTrak CSSI SW-All | F10.7、Kp、ap、Ap、ISN、Cp、C9 | ✅ 2021→2041（含月預測） |
+| GFZ Kp nowcast | Kp、ap、F10.7、SN | ✅ 備援兼近即時 |
+| GFZ Hp30／ap30 | 30 分鐘地磁指數 | ✅ 提升暴起始時刻解析度 |
+| SWPC GOES X-ray | 0.05–0.4 / 0.1–0.8 nm 通量 | ✅ |
+| SWPC GOES 閃焰事件 | 閃焰起訖時間與 A–X 分級 | ✅ |
+| SWPC GOES 積分質子 | ≥10 MeV | ✅ |
+| SWPC RTSW 磁場／太陽風 | IMF Bz/Bt、速度、密度、溫度 | ✅ |
+| SWPC 太陽活動區 | 黑子面積、M/X 級閃焰機率 | ✅ |
+| SWPC 3 日地磁預報 | 逐 3h Kp 預報 | ✅ 預報引擎的**對照基準** |
+| SWPC 27 日展望 | 逐日 F10.7／Ap／最大 Kp | ✅ |
+| SWPC OVATION | 極光橢圓赤道側邊界緯度 | ✅ |
+| **SWPC D-RAP** | D 層吸收最高受影響頻率（全球＋臺灣） | ✅ 架構書原列 C2「需協調」，實為公開產品 |
+| Kyoto WDC Dst | 逐時 Dst | ✅ |
+| **NASA OMNI2** | 逐時 IMF／太陽風／Kp／Dst／F10.7（1963 起） | ✅ 預報引擎的訓練資料來源 |
+| 地基 GNSS TEC/ROTI/S4（在地） | 電離層閃爍實測 | ⛔ 需外部協調 |
+| 區域磁力計即時串流 | 區域地磁 | ⛔ 需外部協調 |
+| 電離層探測儀 | foF2 | ⛔ 需外部協調 |
+
+「可運作」的定義：`configs/sources.yaml` 標 `status: ready`，且在最近一次
+`python -m services.ingest.run --source all` 中完成**連線 → 解析 → 品質標記 → 入庫**
+全程無錯誤。未列於上表而標 `planned` 的 3 個來源為 `tw_gnss_tec`、
+`tw_magnetometer`、`tw_ionosonde`，皆屬需機關協調項。
+
+執行期另有 `degraded` 狀態：來源可取得但資料齡期超過 `latency_budget_s`，
+於 `/v1/health/data` 與儀表板「資料健康」頁標示。**來源存在不等於資料可用。**
+
+完整盤查見 [docs/data_sources_c2c3.md](docs/data_sources_c2c3.md)：C2/C3 應拆成
+「現成可用／免費需註冊／需機關協調」三級，真正高風險的只有最後一級。
+
+---
+
+## 儀表板
+
+`streamlit run apps/dashboard/app.py`，10 頁：
+
+| 頁面 | 用途 |
+|---|---|
+| 太空環境總覽 | 各網域紅綠燈、關鍵指標趨勢、資料齡期 |
+| 參數時序 | 任意參數繪圖，可填 as_of 進入回放模式 |
+| 事件卡 | 事件卡全文與 SDA 介接 JSON、規則可用性 |
+| 太陽閃焰 | 閃焰事件表、X 射線時序、D 層吸收 |
+| 48 小時預報 | 本系統預報 vs NOAA 官方預報 vs 觀測 |
+| 地磁基準場 | IGRF 參考場、測站表、ΔH 推估、Hp30 解析度對比 |
+| 軌道與密度修正 | 密度修正倍率、STK 驅動檔下載 |
+| 資料健康 | 各通道齡期、品質旗標分布、資料源盤點 |
+| 門檻校準 | 互動式門檻掃描（供校準工作坊使用） |
+| **名詞與判讀** | **教育推廣用**：因果鏈、各參數現值落在哪一區、常見誤讀 |
+
+設計原則：**缺資料顯示灰色「無資料」而非綠色「正常」**——
+綠燈會讓值勤人員誤以為已確認該網域無異常。
+
+---
+
+## 常用指令
+
+```bash
+# 擷取
+python -m services.ingest.run --source celestrak_sw_all
+python -m services.ingest.run --source all --offline        # 封閉網路
+python -m services.ingest.run --source omni2_hourly --years 6
+
+# 預報
+python -m services.forecast.run --coverage                  # 特徵覆蓋率體檢
+python -m services.forecast.run --verify                    # 全 horizon 驗證擂台
+# 以 POD 目標挑操作點，並同時輸出訓練／測試落差（達標與否由輸出為準）
+python -m services.forecast.run --verify --objective pod
+python -m services.forecast.run --predict --write           # 產生預報並寫入
+
+# 匯出
+python -m services.exporter.stk_spaceweather --out out/SpaceWeather-All-v1.2.txt
+python -m services.exporter.stk_spaceweather --as-of 2024-05-10T12:00Z   # 回放
+python -m services.exporter.drag_correction --start 2024-05-08 --end 2024-05-14
+
+# 回放演練
+python tools/e2e_demo.py --start 2022-02-01 --end 2022-02-10   # Starlink 再入
+python tools/e2e_demo.py --as-of 2024-05-10T12:00Z             # 無前視偏差回放
+
+# CSSI 一致性比對（把 README 的格式宣稱變成可重跑的檢查）
+python tools/cssi_compare.py                 # 位元組層級，對 data/seed/SW-All.txt
+python tools/cssi_compare.py --level field   # 診斷差異落在哪一欄
+```
+
+**時間範圍語意**：`--start` 與 `--end` 皆為**含端點**（閉區間 `[start, end]`）。
+未給時分秒的日期解為該日 `00:00Z`，所以 `--end 2022-02-10` 涵蓋到該日零時、
+不含該日其餘時段；要涵蓋整日請寫 `--end 2022-02-10T23:59:59Z`。
+
+---
+
+## API
+
+13 個端點，唯讀為主、無狀態、可快取。
+端點集合由 `tests/test_api_contract.py` 守住——新增端點而未同步本節，測試會紅燈。
+
+**回應語意**（以下為目前實際行為，非規劃）：
+
+| 狀態碼 | 意義 |
+|---|---|
+| 200 | 請求成功。**但資料本身可能過期**——須檢查 `degraded` 與 `data_age_s` |
+| 400 | 缺少必要參數（如 `/v1/obs` 未給 `param`） |
+| 404 | 參數未註冊，或事件 ID 不存在 |
+| 500 | 未預期的伺服端例外，回應 `{"error": {"code": "INTERNAL_ERROR", "message": "..."}}`。**不回傳內部例外訊息**（避免洩漏路徑與 SQL 片段），詳情寫入 server log；僅 debug 模式附 `detail` |
+
+**沒有 503**：資料源逾時或劣化時，本系統**仍回 200** 並在 `degraded` 與
+`data_age_s` 標示，讓呼叫端自行決定可接受的新鮮度——把「服務不可用」與
+「資料不夠新」混成同一個狀態碼會讓呼叫端無法區分。此為刻意設計，非疏漏。
+
+`/v1/obs` 帶 `data_age_s`（資料齡期秒數）與 `degraded`（是否逾越該參數的
+更新週期）；`/v1/rules` 的 `status: unavailable` 代表**該規則所需資料不存在**，
+不代表風險為零。這兩者是「沒資料」與「沒事」的區分機制。
+
+| 端點 | 說明 |
+|---|---|
+| `GET /health` | 服務與資料源狀態 |
+| `GET /v1/params` | 參數字典 |
+| `GET /v1/sources` | 資料源盤點 |
+| `GET /v1/health/data` | 各通道資料齡期與品質 |
+| `GET /v1/obs?param=&from=&to=&as_of=` | 觀測序列（`as_of` 觸發回放） |
+| `GET /v1/nowcast` | 各網域當前等級 |
+| `GET /v1/events?from=&to=` | 事件卡清單 |
+| `GET /v1/events/{id}` | 單一事件卡（SDA 介接格式） |
+| `GET /v1/events/{id}/history` | 事件卡修訂歷程 |
+| `GET /v1/rules` | 規則狀態（含 `unavailable` 者） |
+| `GET /v1/flares` | 太陽閃焰事件（含分級與 NOAA R 級） |
+| `GET /v1/exports/stk/spaceweather.txt` | STK/GMAT CSSI 驅動檔 |
+| `GET /v1/exports/drag-correction` | 密度修正因子 |
+
+---
+
+## 環境變數（皆可省略）
+
+| 變數 | 預設 | 說明 |
+|---|---|---|
+| `SWX_DATA_DIR` | `./data` | 資料根目錄 |
+| `SWX_CONFIG_DIR` | `./configs` | 設定目錄 |
+| `SWX_ROOT` | 自動偵測 | 專案根目錄 |
+| `SWX_ORBIT_DB` | 未設 | 既有 `space_db.duckdb` 路徑（掛載 TLE 全庫用） |
+| `SWX_API_HOST` / `SWX_API_PORT` | `127.0.0.1` / `5100` | API 服務位址 |
+| `SWX_API_DEBUG` | `false` | Flask debug 模式 |
+
+---
+
+## 重現本文數字
+
+本文列出的主要計算結果都提供重現入口。稽核時建議照此順序執行：
+
+| 宣稱 | 指令 | 預期 |
+|---|---|---|
+| CSSI 格式一致性 | `python tools/cssi_compare.py` | 已定稿列 2,054/2,054 位元組一致；合計 2,278/2,279 |
+| IGRF 臺灣參考場 | `python -c "import sys;sys.path.insert(0,'packages');from geomag import summary;print(summary())"` | F≈45,007 nT、D≈−4.62°、I≈35.13° |
+| 密度修正倍率 | `python -m services.exporter.drag_correction --start 2024-05-08 --end 2024-05-14` | 峰值 3.67×（500–600 km） |
+| 預報驗證表 | `python -m services.forecast.run --verify --splits 4` | 與 `docs/forecast_verification.md` 相同 |
+| 門檻掃描 | `python tools/whatif_threshold.py --rule ORB-L3-KP6 --param KP_3H --sweep 5,6,7,8` | Kp≥6 約每年 10.5 次 |
+| 密度模型分歧 | `python tools/density_cross_check.py` | MSIS 2.1 vs NRLMSISE-00 相差 7.3–8.8% |
+| 端到端鏈路 | `python tools/e2e_demo.py` | Gannon 事件判為 L4／G4 |
+| 無前視偏差回放 | `python tools/e2e_demo.py --as-of 2024-05-11T00:00Z` | 同一事件判為 L3／G3 |
+
+### 重現條件
+
+**在資料快照、模型設定與執行環境相同時，可重現相同結果。**
+使用較新資料或未鎖定的相依版本時，數字會有小幅差異：
+
+| 項目 | 現況 |
+|---|---|
+| 資料快照 | `data/seed/`（CSSI 快照的產製時刻見檔內 `UPDATED` 標頭） |
+| Python | 3.13.9 |
+| 作業系統 | Windows 11（另於 Linux／WSL2 可執行） |
+| 時區 | 全系統 UTC |
+| 相依鎖定 | `requirements.lock`（55 套件，單一平臺快照，非跨平臺求解） |
+| 版本識別 | **尚未在輸出中帶 `run_id`／`git_commit`／`config_hash`** |
+
+後兩項是已知缺口，非交付級的重現規格；
+建議的補強方式見 [docs/research_review.md](docs/research_review.md) §5.1
+（對齊 COSPAR ISWAT 的驗證中繼資料架構）。
+
+**數字會隨資料累積而變動**：門檻掃描的「每年次數」取決於回放期間長度，
+預報指標取決於訓練資料量。與本文有小幅出入屬正常，
+量級或結論方向不同才需追查。
+
+**CSSI 比對的判準**（避免「換個判準就一致」）：以 CSSI 欄寬右補空白後做
+**位元組相等**比較，不使用數值容差；以 `(區段, 日期)` 配對而非行序，
+區段歸屬本身也是比對項。日期 ≥ 來源檔 `UPDATED` 當日者標為**未定稿**
+（來源仍會修訂）並分開計算——判準取自來源檔自身而非執行日，
+使同一份快照無論何時重跑都得到同一結論。
+
+---
+
+## 開發
+
+```bash
+python -m pytest tests -q
+python -m pytest tests -q -k cssi     # 只跑 CSSI 格式契約測試
+python -m pytest tests -q -k density  # 只跑密度與 ap 模式測試
+```
+
+測試守的是**跨子計畫介面**而非實作細節：CSSI 格式可逆性、雙時間軸無前視偏差、
+品質旗標與參數字典一致性、規則引擎的駐留與遲滯行為、推估與實測的區別。
+
+新增參數前須先在 `configs/params.yaml` 註冊，否則入庫會被判為
+`unregistered_param`；有測試確保所有來源宣告的參數都已註冊。

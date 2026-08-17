@@ -1,0 +1,38 @@
+# 構想書原始文件：不進版控（本 repo 為公開）
+proposals/
+
+# 執行時產生的資料（可由 services.ingest 重建）
+data/swx_parquet/
+data/raw/
+data/exports/
+data/*.duckdb
+data/*.sqlite
+
+# 種子資料：demo 快照納入版控（雲端部署首屏需要），其餘不進
+data/seed/*
+!data/seed/SW-All.txt
+!data/demo/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# 編輯器與系統
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# 暫存
+_swref.txt
+_dump.txt
+~$*
+
+# 暫存與輸出
+tmp/
+out/
+*.log

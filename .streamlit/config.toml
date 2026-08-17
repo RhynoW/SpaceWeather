@@ -1,0 +1,12 @@
+# Streamlit Cloud 與本機共用設定
+[theme]
+base = "dark"
+primaryColor = "#4C9AFF"
+
+[server]
+headless = true
+# 雲端為全新 clone，data/ 無觀測分區時 swx_core.config.data_dir()
+# 會自動退回 data/demo 的示範快照（有真實資料時絕不使用）。
+
+[browser]
+gatherUsageStats = false
