@@ -13,6 +13,7 @@
 | [docs/data_sources_c2c3.md](docs/data_sources_c2c3.md) | 地磁與電離層資料源盤查（C2/C3 風險分級之修正） |
 | [docs/forecast_verification.md](docs/forecast_verification.md) | 預報引擎驗證報告（切分明細、列聯表、未達 KPI 之落差） |
 | [docs/density_model_validation.md](docs/density_model_validation.md) | 大氣密度模型配置、修正因子定義與驗證邊界 |
+| [docs/operations_manual.md](docs/operations_manual.md) | **值勤手冊**（燈號判讀、15 條規則處置對照、維運指令、使用邊界） |
 | [docs/glossary.md](docs/glossary.md) | **名詞說明與參數判讀**（教育推廣、值勤判讀、常見誤讀） |
 | [docs/research_review.md](docs/research_review.md) | **依公開學術研究的強化檢視**（文獻對照、建議順序） |
 
