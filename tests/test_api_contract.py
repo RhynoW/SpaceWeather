@@ -86,3 +86,59 @@ def test_missing_required_param_is_400_not_500(app):
 def test_unregistered_param_is_404(app):
     resp = app.test_client().get("/v1/obs?param=NO_SUCH_PARAM")
     assert resp.status_code == 404
+
+
+def test_research_grade_advisory_present_for_own_forecast(app, tmp_path):
+    """本系統預報必須在 JSON 中自帶作業性告誡。
+
+    只寫在 README 不夠——呼叫端讀的是 JSON。這條守的是「文件說有、實際沒有」。
+    """
+    import pandas as pd
+
+    from swx_core import SwxStore, normalize
+
+    store = SwxStore(tmp_path)
+    t = pd.Timestamp("2026-01-01", tz="UTC")
+    store.write(
+        normalize(pd.DataFrame([{
+            "valid_time": t, "param_code": "KP_3H", "value": 5.0, "unit": "1",
+            "source_id": "swx_forecast", "data_type": "FCS",
+        }])),
+        source_id="swx_forecast",
+    )
+    body = create_app(store).test_client().get("/v1/obs?param=KP_3H").get_json()
+    adv = body.get("advisory")
+    assert adv is not None, "本系統預報未帶 advisory"
+    assert adv["code"] == "RESEARCH_GRADE_FORECAST"
+    assert adv["not_for_operational_use_beyond_h"] == 12
+
+
+def test_no_advisory_for_pure_observations(app, tmp_path):
+    """純觀測不應被貼上預報告誡，否則告誡會被當成雜訊忽略。"""
+    import pandas as pd
+
+    from swx_core import SwxStore, normalize
+
+    store = SwxStore(tmp_path)
+    store.write(
+        normalize(pd.DataFrame([{
+            "valid_time": pd.Timestamp("2026-01-01", tz="UTC"), "param_code": "KP_3H",
+            "value": 3.0, "unit": "1", "source_id": "gfz_nowcast", "data_type": "OBS",
+        }])),
+        source_id="gfz_nowcast",
+    )
+    body = create_app(store).test_client().get("/v1/obs?param=KP_3H").get_json()
+    assert "advisory" not in body
+
+
+def test_health_exposes_data_origin(app):
+    """呼叫端要能分辨服務端的是示範快照還是實際擷取的資料。
+
+    只給資料齡期不夠：快照內的資料在其自身時間軸上看起來是新的，
+    齡期正常，使用者仍會誤以為是即時作業資料。
+    """
+    body = app.test_client().get("/health").get_json()
+    origin = body.get("data")
+    assert origin is not None, "/health 未揭露資料來源性質"
+    assert set(origin) >= {"data_origin", "is_demo", "operational"}
+    assert origin["operational"] is False, "本系統目前全域皆非作業級"

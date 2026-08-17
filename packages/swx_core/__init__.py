@@ -11,7 +11,9 @@
 （架構書 P2：子計畫鬆耦合、契約強耦合）。
 """
 
-from .config import SourceCatalog, SourceSpec, catalog, config_dir, data_dir, project_root
+from .config import (
+    SourceCatalog, SourceSpec, catalog, config_dir, data_dir, data_origin, project_root,
+)
 from .params import ParamRegistry, ParamSpec, registry
 from .quality import apply_quality, cross_source_check, interpolate_gaps, quality_summary
 from .schema import (
@@ -34,7 +36,8 @@ from .store import SwxStore, WriteResult
 __version__ = "0.1.0"
 
 __all__ = [
-    "SourceCatalog", "SourceSpec", "catalog", "config_dir", "data_dir", "project_root",
+    "SourceCatalog", "SourceSpec", "catalog", "config_dir", "data_dir", "data_origin",
+    "project_root",
     "ParamRegistry", "ParamSpec", "registry",
     "apply_quality", "cross_source_check", "interpolate_gaps", "quality_summary",
     "OBS_COLUMNS", "Observation", "empty_frame", "normalize",

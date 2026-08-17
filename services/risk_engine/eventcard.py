@@ -370,24 +370,38 @@ class EventStore:
                 self._audit(con, actor, "issue_event_card", event_id, None)
             return bool(cur.rowcount)
 
+    @staticmethod
+    def _card_from_row(row) -> dict:
+        """把 DB 列還原成事件卡 dict，並以 **status 欄位**覆蓋 payload 內的值。
+
+        payload 是寫入當下的 JSON 快照，其 `status` 停在寫入時的狀態；
+        後續的 `issue()` 與 supersede 只更新 status 欄位。若直接回傳 payload，
+        人工確認後 API 仍會回報 `draft`——狀態機等於沒有傳到呼叫端。
+        欄位才是狀態的唯一真相來源。
+        """
+        card = json.loads(row["payload"])
+        card["status"] = row["status"]
+        return card
+
     def latest(self, event_id: str) -> dict | None:
         with self._conn() as con:
             row = con.execute(
-                "SELECT payload FROM event_card WHERE event_id=? ORDER BY revision DESC LIMIT 1",
+                "SELECT payload, status FROM event_card WHERE event_id=?"
+                " ORDER BY revision DESC LIMIT 1",
                 (event_id,),
             ).fetchone()
-        return json.loads(row["payload"]) if row else None
+        return self._card_from_row(row) if row else None
 
     def list_events(self, *, min_level: str | None = None, limit: int = 100) -> list[dict]:
         sql = (
-            "SELECT ec.payload FROM event_card ec JOIN ("
+            "SELECT ec.payload, ec.status FROM event_card ec JOIN ("
             "  SELECT event_id, max(revision) AS r FROM event_card GROUP BY event_id"
             ") m ON ec.event_id=m.event_id AND ec.revision=m.r"
             " ORDER BY ec.onset_utc DESC LIMIT ?"
         )
         with self._conn() as con:
             rows = con.execute(sql, (limit,)).fetchall()
-        cards = [json.loads(r["payload"]) for r in rows]
+        cards = [self._card_from_row(r) for r in rows]
         if min_level:
             cards = [c for c in cards
                      if level_rank(c["mission_level"]) >= level_rank(min_level)]
@@ -396,10 +410,10 @@ class EventStore:
     def history(self, event_id: str) -> list[dict]:
         with self._conn() as con:
             rows = con.execute(
-                "SELECT payload FROM event_card WHERE event_id=? ORDER BY revision",
+                "SELECT payload, status FROM event_card WHERE event_id=? ORDER BY revision",
                 (event_id,),
             ).fetchall()
-        return [json.loads(r["payload"]) for r in rows]
+        return [self._card_from_row(r) for r in rows]
 
     def audit_trail(self, limit: int = 200) -> pd.DataFrame:
         with self._conn() as con:

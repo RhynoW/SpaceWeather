@@ -90,6 +90,48 @@ class Rule:
         return sorted({c.param for c in self.conditions})
 
 
+# ── 判定依據（inference）的完整列舉 ────────────────────────────────────
+# 契約要求：這個欄位**永遠不得為 null**。null 對呼叫端有歧義——
+# 可能是「直接觀測」「欄位缺失」「未計算」「未知」，而誤讀成觀測是最危險的一種。
+INFERENCE_OBSERVED = "observed"        # 判定依據為直接觀測值
+INFERENCE_MODELLED = "modelled"        # 依據為模型輸出或預報值（非當下觀測）
+INFERENCE_PROXY = "proxy"              # 規則宣告為間接推估（如以 Dst 推 ΔH）
+INFERENCE_UNAVAILABLE = "unavailable"  # 判定所需資料不存在——**不代表風險為零**
+
+INFERENCE_VALUES = (
+    INFERENCE_OBSERVED, INFERENCE_MODELLED, INFERENCE_PROXY, INFERENCE_UNAVAILABLE,
+)
+
+# 由模型或預報產生、而非直接觀測的參數。判定落在這些參數上時標 modelled。
+MODEL_DERIVED_PARAMS = frozenset({
+    "RHO_400", "RHO_RATIO",                          # MSIS 模型輸出
+    "M_FLARE_PROB", "X_FLARE_PROB", "KP_STORM_PROB",  # 機率預報
+    "KP_MAX_DAILY",                                   # 27 日展望（預報）
+})
+
+
+def classify_inference(param: str, rule_inference: str | None) -> str:
+    """決定判定依據。規則自身的宣告優先於參數性質。"""
+    if rule_inference:
+        return rule_inference
+    return INFERENCE_MODELLED if param in MODEL_DERIVED_PARAMS else INFERENCE_OBSERVED
+
+
+def _domain_inference(episodes: list["Episode"], has_data: bool) -> str:
+    """網域層級的判定依據。
+
+    取該網域內**最弱**的一項而非最強：若任一分項是推估，整個網域的等級就
+    不能宣稱為直接觀測所得。無資料時回 unavailable——這與「L0 沒事」不同。
+    """
+    if not has_data:
+        return INFERENCE_UNAVAILABLE
+    if not episodes:
+        return INFERENCE_OBSERVED
+    order = {INFERENCE_OBSERVED: 0, INFERENCE_MODELLED: 1,
+             INFERENCE_PROXY: 2, INFERENCE_UNAVAILABLE: 3}
+    return max((e.inference for e in episodes), key=lambda v: order.get(v, 0))
+
+
 @dataclass
 class Episode:
     """一段持續成立的規則命中。"""
@@ -103,7 +145,7 @@ class Episode:
     peak_time: pd.Timestamp
     peak_param: str
     n_samples: int
-    inference: str | None = None
+    inference: str = INFERENCE_OBSERVED
     scale_hint: str | None = None
     rule: Rule | None = field(default=None, repr=False)
 
@@ -330,7 +372,7 @@ class RiskEngine:
                     peak_time=peak_time,
                     peak_param=peak_param,
                     n_samples=len(idx),
-                    inference=rule.inference,
+                    inference=classify_inference(peak_param, rule.inference),
                     scale_hint=rule.scale_hint,
                     rule=rule,
                 )
@@ -385,7 +427,9 @@ class RiskEngine:
                     "level": level,
                     "data_available": bool(has_data),
                     "active_rules": ",".join(sorted({e.rule_id for e in dom_eps})) or "—",
-                    "inference": "proxy" if dom_eps and all(e.inference == "proxy" for e in dom_eps) else None,
+                    # 網域層級的依據：無資料 → unavailable；全部推估 → proxy；
+                    # 其餘取最弱的一項（proxy > modelled > observed），不回 null。
+                    "inference": _domain_inference(dom_eps, has_data),
                 }
             )
         return pd.DataFrame(rows)

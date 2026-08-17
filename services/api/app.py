@@ -19,7 +19,7 @@ from typing import Any
 import pandas as pd
 from flask import Flask, jsonify, request
 
-from swx_core import SwxStore, catalog, registry
+from swx_core import SwxStore, catalog, data_origin, registry
 from swx_core.flare import flux_to_class, r_scale
 
 from services.exporter import drag_correction, stk_spaceweather
@@ -88,6 +88,9 @@ def create_app(store: SwxStore | None = None) -> Flask:
         return jsonify(
             {
                 "status": "ok",
+                # 呼叫端必須能分辨這台服務端的是示範快照還是實際擷取的資料。
+                # 只給資料齡期不夠——快照內的資料在其自身時間軸上看起來是新的。
+                "data": data_origin(),
                 "params_in_store": store.available_params(),
                 "sources_ready": [s.source_id for s in catalog().ready()],
                 "degraded_sources": sorted(

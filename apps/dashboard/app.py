@@ -32,7 +32,7 @@ import services  # noqa: E402,F401
 from services.exporter import drag_correction, stk_spaceweather  # noqa: E402
 from services.risk_engine.engine import RiskEngine, load_rules  # noqa: E402
 from services.risk_engine.eventcard import build_event_cards  # noqa: E402
-from swx_core import SwxStore, catalog, quality_summary, registry  # noqa: E402
+from swx_core import SwxStore, catalog, data_origin, quality_summary, registry  # noqa: E402
 from swx_core.flare import flux_to_class, r_scale  # noqa: E402
 
 st.set_page_config(page_title="SWX-SDA 太空天氣儀表板", page_icon="🛰", layout="wide")
@@ -79,6 +79,18 @@ def load_episodes(days: int):
     return pd.DataFrame([e.to_dict() for e in eps]), status
 
 
+@st.cache_data(ttl=300)
+def load_event_cards(days: int) -> list[dict]:
+    """近 N 日的事件卡（dict 形式），供值勤模式與事件卡頁共用。"""
+    end = datetime.now(timezone.utc)
+    engine = RiskEngine(get_store())
+    eps, _status = engine.evaluate(start=end - timedelta(days=days), end=end)
+    if not eps:
+        return []
+    cards = build_event_cards(eps, store=get_store())
+    return [c.to_dict() for c in cards]
+
+
 def age_badge(age_s: float | None) -> str:
     if age_s is None or pd.isna(age_s):
         return "⬜ 無資料"
@@ -90,11 +102,20 @@ def age_badge(age_s: float | None) -> str:
 
 
 # ── 側欄 ────────────────────────────────────────────────────────────────
+_ORIGIN = data_origin()
+if _ORIGIN["is_demo"]:
+    st.warning(
+        "⚠️ **DEMO DATA — NOT OPERATIONAL**　"
+        f"本站台使用示範快照（產製於 {_ORIGIN['snapshot_time'] or '未知時刻'}），"
+        "**不是即時作業資料**。快照內的資料在其自身時間軸上看起來是新的，"
+        "但實際上不會更新——請勿據以做任何作業判斷。"
+    )
+
 st.sidebar.title("🛰 SWX-SDA")
 st.sidebar.caption("太空天氣整合資訊與 SDA 應用系統")
 page = st.sidebar.radio(
     "頁面",
-    ["太空環境總覽", "參數時序", "事件卡", "太陽閃焰", "48 小時預報",
+    ["值勤模式", "太空環境總覽", "參數時序", "事件卡", "太陽閃焰", "48 小時預報",
      "地磁基準場", "軌道與密度修正", "資料健康", "門檻校準", "名詞與判讀"],
 )
 lookback = st.sidebar.slider("回顧天數", 1, 60, 7)
@@ -105,8 +126,144 @@ st.sidebar.caption(
 )
 
 
+# ── 0. 值勤模式（一屏掌握全局）──────────────────────────────────────────
+if page == "值勤模式":
+    from swx_core.interpret import (
+        BAND_ALERT, BAND_NOTABLE, BAND_QUIET, BAND_UNKNOWN, GUIDANCE,
+    )
+
+    st.title("值勤模式")
+    st.caption(
+        f"{datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC　"
+        "設計目標：事件發生時 10 秒內掌握全局，不必逐頁切換"
+    )
+
+    store = get_store()
+    reg = registry()
+    now = datetime.now(timezone.utc)
+
+    # ── 第一列：三網域燈號 ──────────────────────────────────────────
+    # 「無資料」與「正常」必須用不同顏色。綠燈代表已確認無異常，
+    # 沒有資料時給綠燈是這套系統最不能犯的錯。
+    nowcast = load_nowcast()
+    INFER_NOTE = {
+        "observed": "", "modelled": "（模型推算）",
+        "proxy": "（間接推估）", "unavailable": "",
+    }
+    cols = st.columns(max(len(nowcast), 1))
+    for col, (_, row) in zip(cols, nowcast.iterrows()):
+        lvl = str(row.get("level", "—"))
+        available = bool(row.get("data_available", False))
+        infer = str(row.get("inference") or "observed")
+        with col:
+            if not available or lvl == "—":
+                st.markdown(
+                    f"<div style='padding:14px;border-radius:8px;background:#3a3a3a;"
+                    f"border-left:6px solid #888'><b>{row['domain']}</b><br>"
+                    f"<span style='font-size:2em'>無資料</span><br>"
+                    f"<small>不代表無風險</small></div>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                color = LEVEL_COLOR.get(lvl, "#888")
+                st.markdown(
+                    f"<div style='padding:14px;border-radius:8px;background:#2b2b2b;"
+                    f"border-left:6px solid {color}'><b>{row['domain']}</b><br>"
+                    f"<span style='font-size:2em;color:{color}'>{lvl}</span>"
+                    f"<br><small>{row.get('active_rules', '—')} {INFER_NOTE.get(infer, '')}</small></div>",
+                    unsafe_allow_html=True,
+                )
+
+    st.divider()
+    left, right = st.columns([3, 2])
+
+    # ── 左：最近事件卡 ──────────────────────────────────────────────
+    with left:
+        st.subheader("最近事件")
+        try:
+            events = load_event_cards(7)
+        except Exception as exc:      # 資料層異常不應讓整頁掛掉
+            events = []
+            st.warning(f"事件卡載入失敗：{type(exc).__name__}")
+        if not events:
+            st.info("近 7 日無事件卡。**這代表規則未觸發，不代表所有通道都有資料**——右側資料齡期為準。")
+        else:
+            for card in events[:4]:
+                lvl = card.get("mission_level", "—")
+                scale = card.get("international_scale")
+                status = card.get("status", "draft")
+                badge = {"draft": "📝 待人工確認", "issued": "✅ 已發布",
+                         "superseded": "🗄 已被取代"}.get(status, status)
+                head = f"**{lvl}**" + (f"　國際 {scale}" if scale else "")
+                with st.container(border=True):
+                    c1, c2 = st.columns([3, 2])
+                    c1.markdown(f"{head}　{card.get('type', '')}")
+                    c2.markdown(f"<div style='text-align:right'>{badge}</div>",
+                                unsafe_allow_html=True)
+                    tl = card.get("timeline", {})
+                    st.caption(
+                        f"`{card.get('event_id', '')}`　起始 {tl.get('onset_utc', '—')}"
+                        f"　持續 {tl.get('duration_h', '—')} h"
+                        f"　可信度 {card.get('confidence', '—')}"
+                    )
+                    recs = card.get("recommendations") or []
+                    if recs:
+                        st.markdown("　".join(f"▸ {r}" for r in recs[:2]))
+                    impacts = card.get("impacts") or []
+                    proxy_n = sum(1 for i in impacts if i.get("inference") == "proxy")
+                    if proxy_n:
+                        st.warning(f"{proxy_n} 個影響分項為**間接推估**，非直接觀測")
+            if len(events) > 4:
+                st.caption(f"另有 {len(events) - 4} 筆，詳見「事件卡」頁")
+
+    # ── 右：資料齡期警報 + 關鍵指標 ─────────────────────────────────
+    with right:
+        st.subheader("資料齡期")
+        stale = []
+        for code in ("KP_3H", "DST", "IMF_BZ", "XRAY_LONG", "PROT10", "DRAP_TW_MHZ"):
+            if code not in reg:
+                continue
+            df = store.query(code, start=now - timedelta(days=3), end=now)
+            spec = reg[code]
+            if df.empty:
+                stale.append((code, None, True))
+                continue
+            age = (now - df["valid_time"].max()).total_seconds()
+            bad = bool(spec.cadence_s and age > 5 * spec.cadence_s)
+            stale.append((code, age, bad))
+        for code, age, bad in stale:
+            label = reg[code].name_zh if code in reg else code
+            if age is None:
+                st.markdown(f"⚪ **{label}**　無資料")
+            else:
+                st.markdown(f"{'🔴' if bad else '🟢'} **{label}**　{age_badge(age)}")
+
+        st.subheader("關鍵指標")
+        badge = {BAND_QUIET: "🟢", BAND_NOTABLE: "🟡", BAND_ALERT: "🔴", BAND_UNKNOWN: "⚪"}
+        rows = []
+        for code in ("KP_3H", "DST", "IMF_BZ", "SW_V", "XRAY_LONG"):
+            g = GUIDANCE.get(code)
+            if g is None:
+                continue
+            df = store.query(code, start=now - timedelta(days=2), end=now)
+            v = None if df.empty else float(df.sort_values("valid_time").iloc[-1]["value"])
+            band = g.band(v)
+            rows.append({"": badge[band], "指標": g.name,
+                         "值": "—" if v is None else f"{v:g}",
+                         "判讀": band})
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        st.caption("判讀基準為教學參考，非系統告警門檻。詳見「名詞與判讀」頁。")
+
+    st.divider()
+    st.caption(
+        "本頁為濃縮視圖。完整規則狀態（含 `unavailable` 者）見「事件卡」頁；"
+        "各通道品質分布見「資料健康」頁。"
+        "**24 小時以上的預報為研究階段產出，本頁刻意不予呈現。**"
+    )
+
+
 # ── 1. 太空環境總覽 ─────────────────────────────────────────────────────
-if page == "太空環境總覽":
+elif page == "太空環境總覽":
     st.title("太空環境總覽")
     st.caption(f"更新於 {datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC")
 

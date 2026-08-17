@@ -160,8 +160,12 @@ def density(
 
     storm_time=True（預設）使用 3 小時 ap 歷史；無此資料時自動退回日均 Ap 模式。
 
-    lat/lon 預設固定於 (0, 0)：常數偏差會被 B_eff 自校準吸收，逐點求真實經緯度
-    不會改善「相對變化」的準確度，卻會大幅增加成本。需要絕對值時應傳入實際座標。
+    lat/lon 預設固定於 (0, 0)，是**參考點而非全球代表值**。
+
+    對 `drag_residual()` 的 B_eff 自校準而言，固定座標造成的常數偏差會被校準吸收；
+    但對交付的 `storm_ratio` **並非如此**——實測顯示評估座標會使暴時比值變動達
+    約 15%（臺灣位置相對 (0,0) 約 −8%，見 tools/density_cross_check.py --coords）。
+    需要對應特定任務區域時，**必須傳入該區域的實際座標**。
     """
     import pymsis
 
@@ -279,6 +283,8 @@ def density_ratio(
     quiet_ap: float = 4.0,
     sw: pd.DataFrame | None = None,
     as_of: datetime | None = None,
+    lat: float = 0.0,
+    lon: float = 0.0,
 ) -> pd.DataFrame:
     """密度與兩種基準的比值（密度修正因子的模型側）。
 
@@ -294,7 +300,7 @@ def density_ratio(
         sw = load_space_weather(start=epochs.min(), end=epochs.max(), as_of=as_of)
 
     alt = np.full(len(epochs), float(alt_km))
-    rho = density(epochs, alt, sw)
+    rho = density(epochs, alt, sw, lat=lat, lon=lon)
 
     f, fa, ap = _sw_arrays(epochs, sw)
 
@@ -322,12 +328,12 @@ def density_ratio(
     quiet_sw.attrs["ap3"] = pd.Series(
         quiet_ap, index=sw.attrs.get("ap3", pd.Series(dtype=float)).index, dtype=float
     )
-    rho_quiet = density(epochs, alt, quiet_sw)
+    rho_quiet = density(epochs, alt, quiet_sw, lat=lat, lon=lon)
 
     # 基準二：**同一 F10.7、地磁寧靜**。兩者相除即可分離出「地磁暴造成的密度增量」，
     #         這才是軌道傳播要套用的修正因子——否則會把太陽週期當成事件效應，
     #         在太陽極大期產生十倍以上的假修正。
-    rho_calm = density(epochs, alt, _calm(sw))
+    rho_calm = density(epochs, alt, _calm(sw), lat=lat, lon=lon)
 
     return pd.DataFrame(
         {

@@ -55,6 +55,32 @@ def data_dir() -> Path:
     return d
 
 
+def data_origin() -> dict:
+    """目前資料來源的性質。展示層據此決定是否顯示 DEMO 橫幅。
+
+    僅顯示資料齡期不足以防止誤讀：示範快照裡的資料**在其自身時間軸上是新的**，
+    齡期看起來可能很正常，使用者仍會誤以為是即時作業資料。
+    因此把「這是不是示範資料」做成明確欄位，而不是讓人從齡期推論。
+    """
+    root = data_dir()
+    is_demo = root.name == "demo"
+    snapshot = None
+    if is_demo:
+        seed = root / "seed" / "SW-All.txt"
+        if seed.exists():
+            for line in seed.read_text(encoding="utf-8", errors="replace").splitlines()[:6]:
+                if line.startswith("UPDATED "):
+                    snapshot = line[len("UPDATED "):].strip()
+                    break
+    return {
+        "data_origin": "demo" if is_demo else "local",
+        "is_demo": is_demo,
+        "operational": False,          # 本系統目前全域皆非作業級，見 README「限制與非目標」
+        "snapshot_time": snapshot,
+        "root": str(root),
+    }
+
+
 @dataclass(frozen=True)
 class SourceSpec:
     source_id: str
