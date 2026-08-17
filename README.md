@@ -592,6 +592,44 @@ python tools/cssi_compare.py --level field   # 診斷差異落在哪一欄
 
 ---
 
+## 部署
+
+### Streamlit Cloud
+
+儀表板可直接部署到 [share.streamlit.io](https://share.streamlit.io)：
+
+| 欄位 | 值 |
+|---|---|
+| Repository | `RhynoW/SpaceWeather` |
+| Branch | `main` |
+| Main file path | `apps/dashboard/app.py` |
+
+**不需要設定任何 secrets 或環境變數。**
+雲端是全新 clone、`data/` 沒有觀測分區，此時 `swx_core.config.data_dir()`
+會自動退回 `data/demo/` 的示範快照（含 449 個 Parquet 分區、36 個參數），
+因此**一開啟就有畫面**，不必等待線上擷取。
+
+設計上刻意讓「有真資料時絕不使用示範快照」——本機開發若誤讀到過期快照
+卻沒察覺，比空白畫面更危險。
+
+要在雲端取得最新資料，於 app 內或排程執行：
+
+```bash
+python -m services.ingest.run --source all
+```
+
+**示範快照會逐漸過期**，其產製時刻見 `data/demo/seed/SW-All.txt` 的
+`UPDATED` 標頭。雲端展示頁面的資料齡期一律照實顯示，不會假裝是即時的。
+
+### 本機
+
+```bash
+streamlit run apps/dashboard/app.py     # http://localhost:8501
+python -m services.api.app              # http://127.0.0.1:5100
+```
+
+---
+
 ## 開發
 
 ```bash
