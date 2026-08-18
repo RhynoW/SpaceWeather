@@ -12,7 +12,7 @@
 """
 
 from .config import (
-    SourceCatalog, SourceSpec, catalog, config_dir, data_dir, data_origin, project_root,
+    SourceCatalog, SourceSpec, catalog, config_dir, data_dir, data_origin, imagery, project_root,
 )
 from .params import ParamRegistry, ParamSpec, registry
 from .quality import apply_quality, cross_source_check, interpolate_gaps, quality_summary
@@ -36,7 +36,7 @@ from .store import SwxStore, WriteResult
 __version__ = "0.1.0"
 
 __all__ = [
-    "SourceCatalog", "SourceSpec", "catalog", "config_dir", "data_dir", "data_origin",
+    "SourceCatalog", "SourceSpec", "catalog", "config_dir", "data_dir", "data_origin", "imagery",
     "project_root",
     "ParamRegistry", "ParamSpec", "registry",
     "apply_quality", "cross_source_check", "interpolate_gaps", "quality_summary",

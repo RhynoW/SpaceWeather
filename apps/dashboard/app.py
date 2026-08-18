@@ -32,7 +32,9 @@ import services  # noqa: E402,F401
 from services.exporter import drag_correction, stk_spaceweather  # noqa: E402
 from services.risk_engine.engine import RiskEngine, load_rules  # noqa: E402
 from services.risk_engine.eventcard import build_event_cards  # noqa: E402
-from swx_core import SwxStore, catalog, data_origin, quality_summary, registry  # noqa: E402
+from swx_core import (  # noqa: E402
+    SwxStore, catalog, data_origin, imagery, quality_summary, registry,
+)
 from swx_core.flare import flux_to_class, r_scale  # noqa: E402
 
 st.set_page_config(page_title="SWX-SDA 太空天氣儀表板", page_icon="🛰", layout="wide")
@@ -101,6 +103,185 @@ def age_badge(age_s: float | None) -> str:
     return f"🔴 {age_s / 86400:.1f} 天前"
 
 
+
+
+# ── 背景自動更新 ────────────────────────────────────────────────────────
+# 為什麼用背景執行緒而不是直接呼叫：完整擷取實測約 47 秒，
+# 放在頁面載入路徑上會讓每次互動都卡住。改成背景跑，
+# 頁面立刻以現有資料渲染，新資料在下一次互動時出現。
+#
+# 為什麼不用排程器：Streamlit Cloud 容器會因閒置休眠，沒有可靠的常駐排程。
+# 「有人開頁面時才確保資料夠新」正好符合展示層的需求，也不浪費資源。
+REFRESH_MAX_AGE_MIN = 60.0
+
+
+@st.cache_resource
+def _refresh_state() -> dict:
+    """跨 session 共用的更新狀態（cache_resource 在整個 app 只有一份）。"""
+    return {"thread": None, "result": None, "progress": None, "error": None}
+
+
+def _run_refresh(state: dict, *, force: bool, include_heavy: bool) -> None:
+    from services.ingest.refresh import refresh_if_stale
+
+    def progress(i, n, sid):
+        state["progress"] = (i, n, sid)
+
+    try:
+        state["result"] = refresh_if_stale(
+            max_age_s=REFRESH_MAX_AGE_MIN * 60.0, force=force,
+            include_heavy=include_heavy, on_progress=progress,
+        )
+        state["error"] = None
+    except Exception as exc:      # noqa: BLE001 - 背景執行緒不可讓例外逃逸
+        state["error"] = f"{type(exc).__name__}: {exc}"
+    finally:
+        state["progress"] = None
+        # 資料換新後，既有的 store 與各頁快取都要作廢，否則畫面仍是舊值
+        st.cache_data.clear()
+        get_store.clear()
+
+
+def start_refresh(*, force: bool = False, include_heavy: bool = False) -> bool:
+    """啟動背景更新。已在執行中則不重複啟動。"""
+    import threading
+
+    state = _refresh_state()
+    thread = state.get("thread")
+    if thread is not None and thread.is_alive():
+        return False
+    t = threading.Thread(target=_run_refresh, args=(state,),
+                         kwargs={"force": force, "include_heavy": include_heavy},
+                         daemon=True)
+    state["thread"] = t
+    t.start()
+    return True
+
+
+def refresh_status_line() -> None:
+    """側欄顯示資料齡期與更新狀態，並提供手動更新。"""
+    from services.ingest.refresh import data_age_s, live_sources
+
+    state = _refresh_state()
+    thread = state.get("thread")
+    running = thread is not None and thread.is_alive()
+
+    try:
+        age = data_age_s()
+    except Exception:
+        age = None
+
+    if age is None:
+        st.sidebar.markdown("**資料齡期**　⚪ 尚無資料")
+    else:
+        mins = age / 60.0
+        icon = "🟢" if mins <= REFRESH_MAX_AGE_MIN else "🟡"
+        label = f"{mins:.0f} 分鐘前" if mins < 120 else f"{mins / 60:.1f} 小時前"
+        st.sidebar.markdown(f"**資料齡期**　{icon} {label}")
+
+    if running:
+        prog = state.get("progress")
+        st.sidebar.caption(
+            f"更新中… {prog[0]}/{prog[1]}　{prog[2]}" if prog else "更新中…"
+        )
+    else:
+        result = state.get("result")
+        if state.get("error"):
+            st.sidebar.error(f"更新失敗：{state['error'][:80]}")
+        elif result is not None and result.ran:
+            st.sidebar.caption(f"上次更新：{result.summary()}")
+
+    c1, c2 = st.sidebar.columns(2)
+    if c1.button("更新", disabled=running, use_container_width=True,
+                 help=f"重新擷取 {len(live_sources())} 個近即時來源（約 30–50 秒，背景執行）"):
+        start_refresh(force=True)
+        st.rerun()
+    if c2.button("完整", disabled=running, use_container_width=True,
+                 help="另含 gfz_hp30（30 分鐘解析地磁指數，單獨約 46 秒）"):
+        start_refresh(force=True, include_heavy=True)
+        st.rerun()
+
+
+def autostart_refresh() -> None:
+    """開站時檢查一次：資料齡期超過門檻就在背景更新。"""
+    state = _refresh_state()
+    if state.get("checked"):
+        return
+    state["checked"] = True
+    try:
+        from services.ingest.refresh import data_age_s
+
+        age = data_age_s()
+    except Exception:
+        return
+    # age is None（雲端冷啟動，只有示範快照）也要更新——那正是最該更新的時候
+    if age is None or age > REFRESH_MAX_AGE_MIN * 60.0:
+        start_refresh(force=False)
+
+# ── 現況橫幅 ────────────────────────────────────────────────────────────
+# 以階梯狀色塊呈現四類現象的當前強度。用階梯而非單一色球，是因為
+# 「現在是第幾階、離下一階多遠」比「現在是什麼顏色」更有判讀價值。
+BANNER_ITEMS = [
+    # (標題, 參數, 階梯門檻由低到高, 階梯標籤, 單位說明)
+    ("太陽閃焰", "XRAY_LONG", [1e-5, 5e-5, 1e-4, 1e-3],
+     ["R1", "R2", "R3", "R4+"], "GOES X 射線"),
+    ("太陽質子", "PROT10", [10, 100, 1000, 10000],
+     ["S1", "S2", "S3", "S4+"], "≥10 MeV"),
+    ("地磁擾動", "KP_3H", [5, 6, 7, 8],
+     ["G1", "G2", "G3", "G4+"], "Kp"),
+    ("HF 吸收", "DRAP_TW_MHZ", [5, 10, 15, 20],
+     ["輕", "中", "重", "極重"], "臺灣周邊 MHz"),
+]
+BANNER_COLORS = ["#2E7D32", "#F9A825", "#EF6C00", "#C62828"]
+
+
+def _banner_level(value, thresholds) -> int:
+    """回傳達到的階數（0 = 未達第一階）。"""
+    if value is None or pd.isna(value):
+        return -1                      # -1 代表無資料，與 0（平靜）不同
+    n = 0
+    for t in thresholds:
+        if float(value) >= t:
+            n += 1
+    return n
+
+
+def render_status_banner(store, *, hours: int = 6) -> None:
+    """四類現象的當前強度階梯。無資料顯示灰階，不顯示綠色。"""
+    now = datetime.now(timezone.utc)
+    cols = st.columns(len(BANNER_ITEMS))
+    for col, (title, code, thresholds, labels, unit) in zip(cols, BANNER_ITEMS):
+        df = store.query(code, start=now - timedelta(hours=hours), end=now)
+        value = None if df.empty else float(df.sort_values("valid_time").iloc[-1]["value"])
+        lvl = _banner_level(value, thresholds)
+
+        with col:
+            if lvl < 0:
+                head = "<span style='color:#9E9E9E'>無資料</span>"
+            elif lvl == 0:
+                head = "<span style='color:#2E7D32'>平靜</span>"
+            else:
+                head = f"<span style='color:{BANNER_COLORS[lvl - 1]}'>{labels[lvl - 1]}</span>"
+            st.markdown(
+                f"<div style='font-size:13px;color:#9aa4b2'>{title}"
+                f"<span style='float:right'>{unit}</span></div>"
+                f"<div style='font-size:20px;font-weight:700;margin:2px 0 6px'>{head}</div>",
+                unsafe_allow_html=True,
+            )
+            # 由高到低堆疊，最高階在上（與強度直覺一致）
+            rungs = []
+            for i in range(len(thresholds) - 1, -1, -1):
+                on = lvl >= i + 1
+                bg = BANNER_COLORS[i] if on else ("#3a3f47" if lvl >= 0 else "#2b2f35")
+                fg = "#fff" if on else "#6b7280"
+                rungs.append(
+                    f"<div style='background:{bg};color:{fg};font-size:11px;"
+                    f"text-align:center;padding:3px 0;margin-bottom:2px;"
+                    f"border-radius:2px'>{labels[i]}</div>"
+                )
+            st.markdown("".join(rungs), unsafe_allow_html=True)
+            st.caption("—" if value is None else f"{value:.3g}")
+
 # ── 側欄 ────────────────────────────────────────────────────────────────
 _ORIGIN = data_origin()
 if _ORIGIN["is_demo"]:
@@ -115,10 +296,14 @@ st.sidebar.title("🛰 SWX-SDA")
 st.sidebar.caption("太空天氣整合資訊與 SDA 應用系統")
 page = st.sidebar.radio(
     "頁面",
-    ["值勤模式", "太空環境總覽", "參數時序", "事件卡", "太陽閃焰", "48 小時預報",
-     "地磁基準場", "軌道與密度修正", "資料健康", "門檻校準", "名詞與判讀"],
+    ["值勤模式", "太空環境總覽", "太陽與行星際影像", "參數時序", "事件卡",
+     "太陽閃焰", "48 小時預報", "地磁基準場", "軌道與密度修正",
+     "資料健康", "門檻校準", "名詞與判讀", "使用指南"],
 )
 lookback = st.sidebar.slider("回顧天數", 1, 60, 7)
+st.sidebar.divider()
+autostart_refresh()
+refresh_status_line()
 st.sidebar.divider()
 st.sidebar.caption(
     "設計原則：缺資料顯示灰色「無資料」而非綠色「正常」——\n"
@@ -141,6 +326,9 @@ if page == "值勤模式":
     store = get_store()
     reg = registry()
     now = datetime.now(timezone.utc)
+
+    render_status_banner(store)
+    st.divider()
 
     # ── 第一列：三網域燈號 ──────────────────────────────────────────
     # 「無資料」與「正常」必須用不同顏色。綠燈代表已確認無異常，
@@ -943,3 +1131,264 @@ elif page == "名詞與判讀":
             st.markdown(body)
 
     st.caption("完整名詞說明見 `docs/glossary.md`。")
+
+
+# ── 影像頁 ──────────────────────────────────────────────────────────────
+elif page == "太陽與行星際影像":
+    st.title("太陽與行星際影像")
+    st.caption(
+        "外部機構產製的公開影像，本系統僅嵌入呈現、不重製散布。"
+        "**每張圖的來源與使用條款與影像同框顯示**——把出處摺疊起來等於實質未標註。"
+    )
+    st.info(
+        "影像為**直接連結產製者網址**，看到的永遠是對方當下的版本，"
+        "不會是我們快取的過期影像。代價是封閉網路環境無法顯示。"
+    )
+
+    GROUPS = [
+        ("solar", "太陽", "黑子、日珥、閃焰與日冕。判斷未來數日風險的源頭。"),
+        ("solarwind", "太陽風與行星際傳播", "CME 何時抵達地球——少數具 1–3 天提前量的資訊。"),
+        ("ionosphere", "電離層", "直接影響 HF 通信與 GNSS 定位的一層。"),
+        ("geospace", "地球空間", "太陽風與磁層的交互作用。"),
+    ]
+    try:
+        items = imagery()
+    except Exception as exc:
+        st.error(f"影像設定載入失敗：{exc}")
+        items = []
+
+    for gid, gname, gdesc in GROUPS:
+        group = [i for i in items if i.get("group") == gid]
+        if not group:
+            continue
+        st.subheader(gname)
+        st.caption(gdesc)
+        for row_start in range(0, len(group), 2):
+            cols = st.columns(2)
+            for col, item in zip(cols, group[row_start:row_start + 2]):
+                with col:
+                    with st.container(border=True):
+                        st.markdown(f"**{item['title']}**")
+                        st.caption(item.get("instrument", ""))
+                        st.image(item["url"], use_container_width=True)
+                        if item.get("note"):
+                            st.markdown(
+                                f"<div style='font-size:13px;line-height:1.6'>"
+                                f"{item['note']}</div>", unsafe_allow_html=True)
+                        attr = item.get("attribution", {})
+                        st.caption(
+                            f"來源：{attr.get('provider', '未標註')}　"
+                            f"[{attr.get('url', '')}]({attr.get('url', '')})　"
+                            f"｜{attr.get('terms', '')}"
+                        )
+        st.divider()
+
+
+# ── 使用指南 ────────────────────────────────────────────────────────────
+elif page == "使用指南":
+    st.title("使用指南")
+    st.caption("依「你想知道什麼」編排，不依現象分類編排。")
+
+    tabs = st.tabs([
+        "這系統在做什麼", "怎麼看懂畫面", "現象與影響",
+        "分級標準", "資料從哪來", "系統邊界",
+    ])
+
+    with tabs[0]:
+        st.markdown("""
+### 一句話
+
+把分散的國內外太空天氣觀測，轉成**任務單位可判讀、可通報、可介接、可計算**的產品。
+
+### 它不是什麼
+
+**不是國家級太空天氣預報中心。** 中央氣象署太空天氣作業辦公室（SWOO）
+才是國內的作業級機構，本系統不取代它。
+
+差別在於：SWOO 提供的是**環境有多強**（採 NOAA 的 G/R/S 尺度）；
+本系統接著回答**對我方任務有多大影響**（L0–L4），
+並附上處置建議、通報對象與資料可信度標示。
+
+### 四類產品
+
+| 產品 | 給誰 | 形式 |
+|---|---|---|
+| 分級判讀 | 值勤席 | L0–L4 燈號與事件卡 |
+| 事件通報 | 相關單位 | 事件卡 JSON，含影響分項與建議處置 |
+| 系統介接 | SDA 平臺 | REST API、圖層 |
+| 軌道計算 | 軌道分析 | STK/GMAT CSSI 驅動檔、大氣密度修正因子 |
+""")
+
+    with tabs[1]:
+        st.markdown("""
+### 三個必記
+
+1. **灰色 ≠ 綠色**——沒資料不是沒事。
+2. **模型 ≠ 實測**——標 `proxy` 的結論不可對外表述為實測。
+3. **24 小時以上的預報不能拿來做決策。**
+
+### 顏色與狀態
+
+| 顯示 | 意義 | 該做什麼 |
+|---|---|---|
+| 🟢 L0 | 規則未觸發，**且該網域有資料** | 正常值勤 |
+| 🟡 L1–L2 | 環境轉變／影響可量測 | 依處置對照表通報 |
+| 🔴 L3–L4 | 嚴重／重大 | 人工確認後發布，啟動通報 |
+| ⚪ 無資料 | 判定所需資料不存在 | **查通道，不是放心** |
+
+### 判定依據 `inference`
+
+事件卡每個影響分項都帶此欄位，**永不為 `null`**：
+
+- `observed`　直接觀測值判定，可作為判斷依據
+- `modelled`　模型或預報輸出，須註明來源為模型
+- `proxy`　　間接推估，**不可對外表述為實測**
+- `unavailable`　資料不存在，**不是安全**
+
+### 時間
+
+**全系統 UTC，無例外。** 臺灣時間 = UTC + 8。交班紀錄請用 UTC。
+""")
+
+    with tabs[2]:
+        st.markdown("""
+### 一條因果鏈
+
+```
+太陽表面        行星際空間       地球磁層       電離層／熱氣層     我方系統
+活動區、閃焰 →  太陽風、IMF  →  地磁擾動   →  電子密度、大氣密度 → 通信／定位／軌道
+```
+
+### 三種擾動的抵達時間差三個數量級
+
+| 擾動 | 抵達時間 | 有無預警空間 |
+|---|---|---|
+| 電磁輻射（X 射線） | **8 分 20 秒** | **沒有**。看到就是已經發生 |
+| 高能質子（SEP） | 數十分鐘～數小時 | 很短 |
+| 日冕物質拋射（CME） | **1–3 天** | 有，地磁暴預警的主要來源 |
+
+所以「閃焰預警」與「地磁暴預警」是兩件難度天差地遠的事。
+
+### 各現象影響什麼
+
+| 現象 | 主要衝擊 | 本系統對應網域 |
+|---|---|---|
+| 太陽閃焰（X 射線） | 日照側 HF 中斷（D 層吸收） | `HF_COMM` |
+| 太陽質子事件 | 極區 HF 中斷、衛星單粒子翻轉 | `HF_COMM` |
+| 地磁暴 | 熱氣層膨脹 → 低軌阻力增加 → 軌道預報誤差 | `ORBIT_PREDICTION` |
+| 電離層擾動／閃爍 | GNSS 定位劣化、載波失鎖、授時中斷 | `GNSS_PNT` |
+
+### 判讀順序
+
+先看 **`IMF_BZ` 與 `SW_V`**（上游、有提前量），再看 **`KP_3H`／`DST`**（已發生的結果）。
+只盯 Kp 等於只看後照鏡。
+
+記一句：**南向 Bz 才會出事。**
+""")
+
+    with tabs[3]:
+        st.markdown("""
+### 兩套分級，不能互換
+
+| 標記 | 是什麼 | 誰定的 |
+|---|---|---|
+| **L0–L4** | **任務風險等級** | 本系統自訂，門檻在 `configs/rules/*.yaml` |
+| G/R/S | 環境事件強度 | NOAA Space Weather Scales |
+
+**G/R/S 說「事件有多強」，L0–L4 說「對我方任務有多大影響」。**
+同一場 G4 對地面單位可能只是 L1，對低軌操作單位可能是 L4，
+所以系統**不提供換算表**。事件卡把兩者放在獨立欄位
+（`international_scale` 與 `mission_level`）。
+
+### NOAA 階梯
+
+| 級 | G（Kp） | R（GOES 0.1–0.8 nm） | S（≥10 MeV 質子） |
+|---|---|---|---|
+| 1 | 5 | 1×10⁻⁵（M1） | 10 pfu |
+| 2 | 6 | 5×10⁻⁵（M5） | 10² pfu |
+| 3 | 7 | 1×10⁻⁴（X1） | 10³ pfu |
+| 4 | 8 | 1×10⁻³（X10） | 10⁴ pfu |
+| 5 | 9 | 2×10⁻³（X20） | 10⁵ pfu |
+
+### 本系統的 L0–L4
+
+| 等級 | 名稱 | 意義 |
+|---|---|---|
+| L0 | 正常 | 規則未觸發，且該網域有資料 |
+| L1 | 注意 | 環境轉變，納入任務前提示 |
+| L2 | 警戒 | 影響可量測，需通報相關席位 |
+| L3 | 嚴重 | 建議調整任務規劃。**須人工確認後發布** |
+| L4 | 重大 | 啟動重大事件通報與事件復盤 |
+
+**門檻目前標記 `calibrated: false`**——尚未與需求單位校準，絕對意義仍待定版。
+完整處置對照見 `docs/operations_manual.md`。
+""")
+
+    with tabs[4]:
+        st.subheader("資料來源與標註")
+        st.caption(
+            "本系統整合的皆為外部機構產製的資料。"
+            "**引用本系統的任何數字時，須一併標註原始產製者。**"
+        )
+        rows = []
+        for spec in catalog():
+            attr = spec.raw.get("attribution") or {}
+            rows.append({
+                "來源": spec.source_id,
+                "狀態": spec.status,
+                "產製者": attr.get("provider", "⚠ 未標註"),
+                "內容": attr.get("product", ""),
+                "使用條款": attr.get("terms", ""),
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+        st.subheader("影像來源")
+        try:
+            img_rows = [{
+                "影像": i["title"],
+                "儀器／模式": i.get("instrument", ""),
+                "產製者": i["attribution"].get("provider", ""),
+                "使用條款": i["attribution"].get("terms", ""),
+            } for i in imagery()]
+            st.dataframe(pd.DataFrame(img_rows), use_container_width=True, hide_index=True)
+        except Exception as exc:
+            st.error(f"影像設定載入失敗：{exc}")
+
+        st.info(
+            "**特別注意**：CWA SWOO 的端點非公開 API，"
+            "本案經成功大學合作管道取得中央氣象署授權後使用。"
+            "**第三方不得逕行取用**，須另行取得授權。"
+        )
+
+    with tabs[5]:
+        st.markdown("""
+### 不可用於什麼
+
+- **不得把 24 小時以上的預報用於作業決策。**
+  測試折 BSS 於 24 小時起轉負，訓練折 POD 約 0.83 而測試折僅 0.02–0.38，
+  過擬合落差存在於所有 horizon。
+- **不得把推估值對外表述為實測。**
+- **不得將 `unavailable` 解讀為 L0。**
+- **未經人工確認的 L3 以上事件卡不得對外發送。**
+- **不得依 DEMO 資料做任何作業判斷。**
+- **不得用地理緯度判斷臺灣的電離層風險**——臺灣地磁緯度僅約 19°N，
+  位於赤道異常駝峰，用地理緯度會系統性低估。
+
+### 目前未校準的項目
+
+| 項目 | 標記 |
+|---|---|
+| L0–L4 分級門檻 | `calibrated: false` |
+| 密度修正因子 | `calibrated_by_observation: false` |
+| D-RAP 與在地 HF 通聯的對應 | 未校準 |
+| 多頻段影響矩陣 | 未校準 |
+
+### 已知的模型限制
+
+- **IGRF 基準場**僅通過值域合理性檢查，未與任一測站實測序列逐點比對。
+- **密度修正因子**在固定參考點（lat 0°／lon 0°）算出，
+  座標會使倍率變動達 14.9%（臺灣位置約 −8.45%）。
+- **CSSI 格式**已對來源實檔逐行驗證，但 STK 端實際載入尚未交叉比對。
+
+完整說明見 `docs/operations_manual.md` 與 `docs/research_review.md`。
+""")

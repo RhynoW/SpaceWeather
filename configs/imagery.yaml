@@ -1,0 +1,180 @@
+# 影像來源盤點（設定即契約，與 sources.yaml 同一原則）
+#
+# 這些是**外部機構產製的公開影像**，本系統只做嵌入呈現，不重製、不再散布。
+# 因此每一張都必須帶 attribution，並在 UI 上與影像同框顯示——
+# 把來源摺疊起來或只放在頁尾，等於實質上未標註。
+#
+# 一律直接連結原始網址（hotlink）而非下載轉存：
+#   · 確保呈現的是產製者當下的版本，不會出現我們快取的過期影像
+#   · 避免衍生「重製散布」的授權問題
+# 代價是離線環境看不到影像，這是刻意取捨（UI 會顯示無法載入而非空白）。
+
+defaults:
+  request_timeout_s: 20
+
+images:
+  # ── 太陽 ────────────────────────────────────────────────────────────
+  - id: sdo_white_light
+    group: solar
+    title: 太陽黑子（白光）
+    instrument: SDO/HMI Intensitygram
+    url: https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_HMIIF.jpg
+    cadence_s: 900
+    note: >
+      可見光影像上的暗斑即黑子，是磁場強烈集中之處。
+      大部分閃焰與 CME 從黑子群（活動區）發出，黑子數與面積是判斷未來數日風險的線索。
+    attribution:
+      provider: NASA/SDO 與 AIA、EVE、HMI 科學團隊
+      url: https://sdo.gsfc.nasa.gov/
+      terms: 美國政府公眾領域資料；使用時請標註 NASA/SDO
+
+  - id: sdo_euv_304
+    group: solar
+    title: 日珥與色球（極紫外 304Å）
+    instrument: SDO/AIA 304Å
+    url: https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0304.jpg
+    cadence_s: 900
+    note: >
+      約 5 萬 K 的色球與過渡區。邊緣噴出的環狀結構為日珥，
+      其爆發常伴隨日冕物質拋射（CME）——即地磁暴的主因。
+    attribution:
+      provider: NASA/SDO 與 AIA、EVE、HMI 科學團隊
+      url: https://sdo.gsfc.nasa.gov/
+      terms: 美國政府公眾領域資料；使用時請標註 NASA/SDO
+
+  - id: sdo_euv_094
+    group: solar
+    title: 閃焰（極紫外 94Å）
+    instrument: SDO/AIA 94Å
+    url: https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0094.jpg
+    cadence_s: 900
+    note: >
+      約 600 萬 K 的閃焰電漿。此波段的亮化直接對應正在發生的閃焰，
+      可與 GOES X 射線通量時序對照判讀。
+    attribution:
+      provider: NASA/SDO 與 AIA、EVE、HMI 科學團隊
+      url: https://sdo.gsfc.nasa.gov/
+      terms: 美國政府公眾領域資料；使用時請標註 NASA/SDO
+
+  - id: sdo_magnetogram
+    group: solar
+    title: 光球磁圖
+    instrument: SDO/HMI Magnetogram
+    url: https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_HMIB.jpg
+    cadence_s: 900
+    note: >
+      黑白分別代表磁場的南北極性。同一活動區內極性交錯（δ 型）者
+      產生大型閃焰的機率顯著較高，是預判 X 級閃焰的重要形態依據。
+    attribution:
+      provider: NASA/SDO 與 AIA、EVE、HMI 科學團隊
+      url: https://sdo.gsfc.nasa.gov/
+      terms: 美國政府公眾領域資料；使用時請標註 NASA/SDO
+
+  - id: soho_lasco_c2
+    group: solar
+    title: 日冕儀（CME 監視）
+    instrument: SOHO/LASCO C2
+    url: https://soho.nascom.nasa.gov/data/realtime/c2/512/latest.jpg
+    cadence_s: 1800
+    note: >
+      遮蔽日面後觀測外日冕。CME 在此呈現為向外擴張的亮弧；
+      **正對地球的 CME 會呈現環繞日面的暈狀（halo）**，是地磁暴預警的關鍵形態。
+      抵達地球需 1–3 天，這是本系統少數具真實提前量的資訊。
+    attribution:
+      provider: ESA/NASA SOHO — LASCO 由 NRL 主持之國際團隊建造
+      url: https://soho.nascom.nasa.gov/
+      terms: 公開；使用時請標註 SOHO（ESA & NASA）
+
+  # ── 電離層 ──────────────────────────────────────────────────────────
+  - id: swpc_drap_global
+    group: ionosphere
+    title: D 層吸收（HF 中斷範圍）
+    instrument: NOAA SWPC D-RAP
+    url: https://services.swpc.noaa.gov/images/animations/d-rap/global/latest.png
+    cadence_s: 300
+    note: >
+      閃焰期間 D 層電子密度暴增，吸收穿過的 HF 電波。
+      圖上數值為**因吸收而不可用的最高頻率**，數字越高中斷越嚴重。
+      僅發生於日照側。本系統另有數值化的 `DRAP_MAX_MHZ` 與 `DRAP_TW_MHZ`。
+    attribution:
+      provider: NOAA/NWS Space Weather Prediction Center
+      url: https://www.swpc.noaa.gov/products/d-region-absorption-predictions-d-rap
+      terms: 美國政府公眾領域資料
+
+  - id: swpc_ctipe_tec
+    group: ionosphere
+    title: 全球總電子含量（TEC）
+    instrument: NOAA SWPC CTIPe 模式
+    url: https://services.swpc.noaa.gov/images/animations/ctipe/tec/latest.png
+    cadence_s: 900
+    note: >
+      **這是模式輸出，不是觀測。** TEC 直接造成 GNSS 測距誤差
+      （GPS L1 上 1 TECU ≈ 0.16 公尺）。判讀臺灣時請注意赤道異常雙峰結構——
+      臺灣地磁緯度僅約 19°N，正落在駝峰區。在地實測值見 `TEC` 參數（來源 CWA）。
+    attribution:
+      provider: NOAA/NWS Space Weather Prediction Center（CTIPe 模式）
+      url: https://www.swpc.noaa.gov/products/ctipe-total-electron-content
+      terms: 美國政府公眾領域資料
+
+  - id: swpc_ovation_north
+    group: ionosphere
+    title: 極光橢圓（北半球）
+    instrument: NOAA SWPC OVATION Prime
+    url: https://services.swpc.noaa.gov/images/animations/ovation/north/latest.jpg
+    cadence_s: 1800
+    note: >
+      **模式輸出。** 極光環向赤道擴張的程度是擾動深入程度的直觀指標；
+      邊界壓到的緯度以上，HF 與 GNSS 開始受影響。
+      數值化的赤道側邊界緯度見 `AURORA_BOUNDARY_LAT`。
+    attribution:
+      provider: NOAA/NWS Space Weather Prediction Center（OVATION Prime）
+      url: https://www.swpc.noaa.gov/products/aurora-30-minute-forecast
+      terms: 美國政府公眾領域資料
+
+  # ── 太陽風模擬（行星際傳播）────────────────────────────────────────
+  - id: swpc_enlil
+    group: solarwind
+    title: 太陽風／CME 傳播模擬
+    instrument: NOAA SWPC WSA-Enlil
+    url: https://services.swpc.noaa.gov/images/animations/enlil/latest.jpg
+    cadence_s: 3600
+    note: >
+      **模式輸出，不是觀測。** 以日冕模式（WSA）驅動的行星際 MHD 模擬，
+      呈現太陽風速度與 CME 在黃道面與子午面的傳播。
+      判讀重點是**CME 前緣何時抵達地球**（圖中標示 Earth 的位置），
+      這是本系統少數具 1–3 天提前量的資訊來源。
+      模擬結果對 CME 初始參數敏感，抵達時間典型誤差達數小時至十餘小時。
+    attribution:
+      provider: NOAA/NWS Space Weather Prediction Center（WSA-Enlil，Enlil 模式由 D. Odstrcil 開發）
+      url: https://www.swpc.noaa.gov/products/wsa-enlil-solar-wind-prediction
+      terms: 美國政府公眾領域資料
+
+  - id: swpc_geospace_velocity
+    group: solarwind
+    title: 磁層太陽風速度耦合
+    instrument: NOAA SWPC Geospace 模式
+    url: https://services.swpc.noaa.gov/images/animations/geospace/velocity/latest.png
+    cadence_s: 900
+    note: >
+      **模式輸出。** 以 L1 實測太陽風驅動的磁層模擬，
+      可看出當前太陽風條件如何傳遞到近地空間。與 `IMF_BZ` 併看：
+      南向 Bz 才會有效率地把能量灌入磁層。
+    attribution:
+      provider: NOAA/NWS Space Weather Prediction Center（Geospace 模式）
+      url: https://www.swpc.noaa.gov/products/geospace-ground-magnetic-perturbation-maps
+      terms: 美國政府公眾領域資料
+
+  # ── 地球空間 ────────────────────────────────────────────────────────
+  - id: swpc_geospace_density
+    group: geospace
+    title: 磁層電漿密度
+    instrument: NOAA SWPC Geospace 模式
+    url: https://services.swpc.noaa.gov/images/animations/geospace/density/latest.png
+    cadence_s: 900
+    note: >
+      **模式輸出。** 呈現太陽風與磁層的交互作用，可看出磁層頂受壓程度。
+      磁層頂被壓到同步軌道以內時，同步衛星會暴露於太陽風中。
+    attribution:
+      provider: NOAA/NWS Space Weather Prediction Center（Geospace 模式）
+      url: https://www.swpc.noaa.gov/products/geospace-geomagnetic-activity-plot
+      terms: 美國政府公眾領域資料

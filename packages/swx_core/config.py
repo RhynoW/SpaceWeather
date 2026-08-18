@@ -81,6 +81,24 @@ def data_origin() -> dict:
     }
 
 
+@lru_cache(maxsize=2)
+def imagery() -> list[dict]:
+    """影像來源盤點（configs/imagery.yaml）。
+
+    影像為外部機構產製，本系統僅嵌入呈現。每一筆都必須帶 attribution——
+    載入時就檢查，缺標註直接拋錯，不讓未標註的影像有機會顯示出去。
+    """
+    path = config_dir() / "imagery.yaml"
+    if not path.exists():
+        return []
+    doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    items = list(doc.get("images") or [])
+    missing = [i.get("id", "?") for i in items if not i.get("attribution")]
+    if missing:
+        raise ValueError(f"影像來源缺少 attribution，不得呈現：{missing}")
+    return items
+
+
 @dataclass(frozen=True)
 class SourceSpec:
     source_id: str

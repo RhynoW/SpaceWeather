@@ -229,11 +229,14 @@ params:
     name_en: Regional geomagnetic disturbance (TW)
     unit: nT
     domain: geomag
-    valid_min: 0.0
-    valid_max: 2000.0
-    cadence_s: 60
+    # 帶號值：ΔH = 實測水平強度 − 寧靜基線，暴時為負（與 Dst 同慣例）。
+    # 原本 valid_min 設 0 會讓 CWA 的 TWDI（實測為負）被品質管線整批判為
+    # below_valid_min 而靜默丟棄——本案的 proxy 推估同樣是負值，一併修正。
+    valid_min: -1000.0
+    valid_max: 500.0
+    cadence_s: 3600
     impacts: [GNSS_PNT, HF_COMM]
-    status: planned
+    status: ready
 
   # ── 太陽風／IMF（新建 C1）────────────────────────────────────────────
   - code: IMF_BZ
@@ -438,9 +441,9 @@ params:
     domain: iono
     valid_min: 0.0
     valid_max: 300.0
-    cadence_s: 900
+    cadence_s: 3600
     impacts: [GNSS_PNT, SATCOM]
-    status: planned
+    status: ready
   - code: ROTI
     name_zh: TEC 變化率指標
     name_en: Rate of TEC index

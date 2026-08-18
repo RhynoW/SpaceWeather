@@ -276,3 +276,90 @@ def test_primary_tier_wins_within_same_timestamp():
     ]
     wide = cssi.from_observations(normalize(pd.DataFrame(rows)))
     assert wide.iloc[0]["f107_obs"] == pytest.approx(80.4)
+
+
+# ── 來源標註（公開資料引用義務）────────────────────────────────────────
+def test_every_source_has_attribution():
+    """每個資料源都必須標註產製者、出處與使用條款。
+
+    本系統整合的全是外部機構產製的資料，引用時有標註義務。
+    把它變成契約測試，是因為「新增來源時忘了填標註」不會有任何徵兆——
+    資料照常入庫、畫面照常顯示，只有法遵出問題。
+    """
+    for source in catalog():
+        attr = source.raw.get("attribution")
+        assert attr, f"來源 {source.source_id} 缺少 attribution"
+        for key in ("provider", "product", "url", "terms"):
+            assert attr.get(key), f"來源 {source.source_id} 的 attribution 缺 {key}"
+
+
+def test_every_image_has_attribution():
+    """影像同理，且載入器會在缺標註時直接拋錯而非靜默略過。"""
+    from swx_core import imagery
+
+    items = imagery()
+    assert items, "影像盤點為空"
+    for item in items:
+        attr = item.get("attribution")
+        assert attr, f"影像 {item.get('id')} 缺少 attribution"
+        for key in ("provider", "url", "terms"):
+            assert attr.get(key), f"影像 {item.get('id')} 的 attribution 缺 {key}"
+
+
+def test_restricted_source_terms_are_explicit():
+    """非公開來源的授權限制必須寫進條款，不能只寫在註解裡。
+
+    CWA SWOO 的端點非公開 API，本案經授權使用；第三方不得比照辦理。
+    這個限制若只存在於程式註解，複用本專案的人不會看到。
+    """
+    spec = next(s for s in catalog() if s.source_id == "cwa_swoo")
+    terms = spec.raw["attribution"]["terms"]
+    assert "授權" in terms
+    assert "第三方" in terms, "未載明第三方不得逕行取用"
+
+
+# ── 自動更新的新鮮度判定 ────────────────────────────────────────────────
+def test_freshness_ignores_future_ingest_times(tmp_path):
+    """預測列的 ingest_time 落在未來，不得被當成「我們已經拿到資料」。
+
+    背景：CelesTrak 月預測列的 valid_time 遠到 2041 年，回填模式據此推算的
+    ingest_time 也在未來。若 max(ingest_time) 不濾掉這些，齡期會變成負值，
+    **自動更新永遠不會觸發**——而且畫面一切正常，不會有任何徵兆。
+    """
+    from datetime import datetime, timezone
+
+    from services.ingest.refresh import data_age_s, last_ingest_time
+
+    store = SwxStore(tmp_path)
+    now = datetime(2026, 8, 18, 12, tzinfo=timezone.utc)
+
+    recent = _obs("KP_3H", [3.0], start="2026-08-18")
+    store.write(recent, source_id="test",
+                ingest_time=datetime(2026, 8, 18, 10, tzinfo=timezone.utc))
+
+    future = _obs("F107_OBS", [120.0], start="2041-10-02", freq="24h")
+    future["data_type"] = "PRM"          # 月預測
+    store.write(future, source_id="test",
+                ingest_time=datetime(2041, 10, 2, tzinfo=timezone.utc))
+
+    latest = last_ingest_time(store, now=now)
+    assert latest is not None
+    assert latest.year == 2026, f"取到未來時刻 {latest}"
+
+    age = data_age_s(store, now=now)
+    assert age is not None and age > 0, "齡期不得為負"
+    assert abs(age - 7200) < 60, f"齡期應約 2 小時，實得 {age}s"
+
+
+def test_heavy_sources_excluded_from_auto_refresh():
+    """重量級來源不得進入頁面載入路徑。
+
+    實測 gfz_hp30 單一來源約 46 秒，佔全部擷取時間的六成；
+    放進自動更新會讓每次逾時後的頁面載入卡住。
+    """
+    from services.ingest.refresh import HEAVY_SOURCES, live_sources
+
+    auto = set(live_sources())
+    assert not (auto & HEAVY_SOURCES), "重量級來源混入自動更新"
+    assert "omni2_hourly" not in auto, "歷史回填來源混入自動更新"
+    assert set(live_sources(include_heavy=True)) >= auto | HEAVY_SOURCES

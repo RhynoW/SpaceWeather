@@ -18,6 +18,11 @@ sources:
     name: CelesTrak Space Weather (CSSI SW-All)
     connector: celestrak_sw
     tier: 1
+    attribution:
+      provider: 'CelesTrak（Dr. T.S. Kelso）'
+      product: 'CelesTrak Space Weather Data；原始資料源自 NOAA SWPC 與 GFZ Potsdam'
+      url: 'https://celestrak.org/SpaceData/'
+      terms: '免費公開；使用時請標註 CelesTrak'
     status: ready
     provides: [F107_OBS, F107_ADJ, F107_OBS_C81, F107_ADJ_C81, F107_OBS_L81,
                F107_ADJ_L81, F107_Q, ISN, CP, C9, KP_3H, AP_3H, AP_AVG]
@@ -38,6 +43,11 @@ sources:
     name: GFZ Potsdam Kp/ap nowcast
     connector: gfz_nowcast
     tier: 2
+    attribution:
+      provider: 'GFZ German Research Centre for Geosciences'
+      product: 'GFZ Potsdam Kp/ap/Ap/SN/F10.7 nowcast'
+      url: 'https://kp.gfz-potsdam.de/'
+      terms: 'CC BY 4.0；引用 Matzka et al. (2021), Space Weather'
     status: ready
     provides: [KP_3H, AP_3H, F107_OBS, ISN]
     cadence_s: 10800
@@ -53,6 +63,11 @@ sources:
     name: NOAA SWPC GOES X-ray flux
     connector: swpc_json
     tier: 1
+    attribution:
+      provider: 'NOAA/NWS Space Weather Prediction Center'
+      product: 'GOES XRS 軟 X 射線通量'
+      url: 'https://services.swpc.noaa.gov/'
+      terms: '美國政府公眾領域資料（U.S. Government work, public domain）'
     status: ready
     provides: [XRAY_LONG, XRAY_SHORT]
     cadence_s: 60
@@ -65,6 +80,11 @@ sources:
     name: NOAA SWPC DSCOVR magnetometer (RTSW)
     connector: swpc_json
     tier: 1
+    attribution:
+      provider: 'NOAA/NWS Space Weather Prediction Center'
+      product: 'DSCOVR/ACE 即時太陽風磁場（RTSW）'
+      url: 'https://services.swpc.noaa.gov/'
+      terms: '美國政府公眾領域資料（U.S. Government work, public domain）'
     status: ready
     provides: [IMF_BZ, IMF_BT]
     cadence_s: 60
@@ -78,6 +98,11 @@ sources:
     name: NOAA SWPC DSCOVR plasma (RTSW)
     connector: swpc_json
     tier: 1
+    attribution:
+      provider: 'NOAA/NWS Space Weather Prediction Center'
+      product: 'DSCOVR/ACE 即時太陽風電漿（RTSW）'
+      url: 'https://services.swpc.noaa.gov/'
+      terms: '美國政府公眾領域資料（U.S. Government work, public domain）'
     status: ready
     provides: [SW_V, SW_N, SW_T]
     cadence_s: 60
@@ -91,6 +116,11 @@ sources:
     name: NOAA SWPC estimated planetary K index
     connector: swpc_json
     tier: 2
+    attribution:
+      provider: 'NOAA/NWS Space Weather Prediction Center'
+      product: '行星際 Kp 估計值（1 分鐘）'
+      url: 'https://services.swpc.noaa.gov/'
+      terms: '美國政府公眾領域資料（U.S. Government work, public domain）'
     status: ready
     provides: [KP_3H]
     cadence_s: 10800
@@ -103,6 +133,11 @@ sources:
     name: NOAA SWPC GOES integral protons
     connector: swpc_json
     tier: 1
+    attribution:
+      provider: 'NOAA/NWS Space Weather Prediction Center'
+      product: 'GOES 積分質子通量'
+      url: 'https://services.swpc.noaa.gov/'
+      terms: '美國政府公眾領域資料（U.S. Government work, public domain）'
     status: ready
     provides: [PROT10]
     cadence_s: 300
@@ -115,6 +150,11 @@ sources:
     name: NOAA SWPC GOES X-ray flare events
     connector: swpc_solar
     tier: 1
+    attribution:
+      provider: 'NOAA/NWS Space Weather Prediction Center'
+      product: 'GOES X 射線閃焰事件表'
+      url: 'https://services.swpc.noaa.gov/'
+      terms: '美國政府公眾領域資料（U.S. Government work, public domain）'
     status: ready
     provides: [FLARE_PEAK, FLARE_DURATION]
     cadence_s: 60
@@ -130,6 +170,11 @@ sources:
     name: NOAA SWPC solar active regions
     connector: swpc_solar
     tier: 1
+    attribution:
+      provider: 'NOAA/NWS Space Weather Prediction Center'
+      product: '太陽活動區與 M/X 級閃焰機率'
+      url: 'https://services.swpc.noaa.gov/'
+      terms: '美國政府公眾領域資料（U.S. Government work, public domain）'
     status: ready
     provides: [AR_COUNT, AR_AREA_TOTAL, M_FLARE_PROB, X_FLARE_PROB]
     cadence_s: 86400
@@ -146,6 +191,11 @@ sources:
     name: GFZ Hp30 / ap30 high-cadence geomagnetic index
     connector: geomag_sources
     tier: 1
+    attribution:
+      provider: 'GFZ German Research Centre for Geosciences'
+      product: 'GFZ Potsdam Hp30/ap30 高解析地磁指數'
+      url: 'https://kp.gfz-potsdam.de/en/hp30-hp60'
+      terms: 'CC BY 4.0；引用 Yamazaki et al. (2022), Space Weather'
     status: ready
     provides: [HP30, AP30]
     cadence_s: 1800
@@ -162,6 +212,11 @@ sources:
     name: NOAA SWPC OVATION auroral oval
     connector: geomag_sources
     tier: 1
+    attribution:
+      provider: 'NOAA/NWS Space Weather Prediction Center'
+      product: 'OVATION Prime 極光橢圓機率模式'
+      url: 'https://services.swpc.noaa.gov/'
+      terms: '美國政府公眾領域資料（U.S. Government work, public domain）'
     status: ready
     provides: [AURORA_BOUNDARY_LAT, AURORA_MAX_PROB]
     cadence_s: 1800
@@ -178,6 +233,11 @@ sources:
     name: NOAA SWPC 3-day geomagnetic forecast
     connector: forecast_sources
     tier: 1
+    attribution:
+      provider: 'NOAA/NWS Space Weather Prediction Center'
+      product: '3 日地磁預報'
+      url: 'https://services.swpc.noaa.gov/'
+      terms: '美國政府公眾領域資料（U.S. Government work, public domain）'
     status: ready
     provides: [KP_3H]
     cadence_s: 43200
@@ -193,6 +253,11 @@ sources:
     name: NOAA SWPC 27-day outlook
     connector: forecast_sources
     tier: 1
+    attribution:
+      provider: 'NOAA/NWS Space Weather Prediction Center'
+      product: '27 日太陽與地磁展望'
+      url: 'https://services.swpc.noaa.gov/'
+      terms: '美國政府公眾領域資料（U.S. Government work, public domain）'
     status: ready
     provides: [F107_OBS, AP_AVG, KP_MAX_DAILY]
     cadence_s: 86400
@@ -206,6 +271,11 @@ sources:
     name: Kyoto WDC Dst index (real-time)
     connector: forecast_sources
     tier: 1
+    attribution:
+      provider: 'World Data Center for Geomagnetism, Kyoto（京都大學）'
+      product: 'Dst 即時指數（暫定值 provisional）'
+      url: 'https://wdc.kugi.kyoto-u.ac.jp/'
+      terms: '學術使用免費；須依 WDC Kyoto 引用規範標註，並註明所用為暫定值'
     status: ready
     provides: [DST]
     cadence_s: 3600
@@ -215,10 +285,43 @@ sources:
     format: kyoto_dst_html
     notes: 逐時 Dst 即時值（euc-jp HTML）。歷史值需另接 final/provisional 檔。
 
+  - source_id: cwa_swoo
+    name: 中央氣象署太空天氣作業辦公室（在地實測）
+    connector: cwa_swoo
+    tier: 1
+    attribution:
+      provider: '交通部中央氣象署 太空天氣作業辦公室（SWOO）'
+      product: 'TWTEC 為地震測報中心地面 GNSS 接收網（逾 100 站）反演；TWDI 為三分量磁力計水平總強度減寧靜基線後取各站中位數'
+      url: 'https://swoo.cwa.gov.tw/'
+      terms: '非公開 API。本案經成功大學合作管道取得中央氣象署授權後使用；第三方不得逕行取用，須另行取得授權。引用時須標註中央氣象署為資料產製者'
+    status: ready
+    provides: [TEC, DB_TW]
+    cadence_s: 3600
+    latency_budget_s: 86400
+    publication_lag_s: 3600
+    endpoint: https://swoo.cwa.gov.tw/json/SWInfo.json
+    format: cwa_swoo_json
+    # TAIWAN-CA 的中介憑證缺少 Subject Key Identifier，Python 3.12+ 的
+    # VERIFY_X509_STRICT 會拒絕。**憑證鏈與主機名仍完整驗證**，僅放寬該項
+    # 擴充欄位的一致性檢查。逐來源明示啟用，不設全域預設。
+    tls_relaxed_strict: true
+    notes: >
+      **本案唯一的在地實測來源。** 這兩項填補了架構書列為 C2／C3「需機關協調」的核心缺口：
+      GNSS_PNT 網域因此從「規則全部 unavailable」變成至少有一個可判定的實測參數。
+      **待確認**：TWDI 的基線定義與時間解析度尚未與 CWA 核對
+      （抓取當下 TWDI=-186 nT 而同檔 DST=-28、Kp=3.67 屬平靜），
+      故暫不讓其驅動分級規則，見 docs/cwa_swoo_analysis.md。
+      同一端點另含 kidx/DST/sws/XrayFx 等全球量，本案已有權威來源，刻意不取。
+
   - source_id: swpc_drap
     name: NOAA SWPC D-Region Absorption Prediction
     connector: forecast_sources
     tier: 1
+    attribution:
+      provider: 'NOAA/NWS Space Weather Prediction Center'
+      product: 'D-Region Absorption Prediction（D-RAP）'
+      url: 'https://services.swpc.noaa.gov/'
+      terms: '美國政府公眾領域資料（U.S. Government work, public domain）'
     status: ready
     provides: [DRAP_MAX_MHZ, DRAP_TW_MHZ]
     cadence_s: 300
@@ -235,6 +338,11 @@ sources:
     name: NASA OMNI2 hourly merged dataset
     connector: omni
     tier: 3                       # 參考／訓練用（事後重整，非即時）
+    attribution:
+      provider: 'NASA/GSFC Space Physics Data Facility（OMNIWeb）'
+      product: 'OMNI2 逐時整合資料集。各參數的原始產製者不同：IMF 與太陽風為 ACE/Wind/IMP 等衛星，Kp/ap 為 GFZ，Dst 為 WDC Kyoto，F10.7 為加拿大 DRAO'
+      url: 'https://omniweb.gsfc.nasa.gov/'
+      terms: '公開；引用 King & Papitashvili (2005), JGR，並一併標註各原始產製者'
     status: ready
     provides: [KP_3H, AP_3H, DST, F107_OBS, SW_V, SW_N, IMF_BZ]
     cadence_s: 3600
@@ -253,6 +361,11 @@ sources:
     name: 地基 GNSS 網 TEC/ROTI/S4
     connector: null
     tier: 1
+    attribution:
+      provider: '（待協調）交通部中央氣象署'
+      product: '地基 GNSS 網原始觀測 TEC/ROTI/S4'
+      url: 'https://swoo.cwa.gov.tw/'
+      terms: '須另行申請授權'
     status: planned
     provides: [TEC, ROTI, S4]
     cadence_s: 300
@@ -262,6 +375,11 @@ sources:
     name: 臺灣周邊磁力計站
     connector: null
     tier: 1
+    attribution:
+      provider: '（待協調）交通部中央氣象署'
+      product: '地磁測站即時串流'
+      url: 'https://swoo.cwa.gov.tw/'
+      terms: '須另行申請授權'
     status: planned
     provides: [DB_TW]
     cadence_s: 60
@@ -271,6 +389,11 @@ sources:
     name: 電離層探測儀
     connector: null
     tier: 1
+    attribution:
+      provider: '（待協調）交通部中央氣象署'
+      product: '電離層探測儀 foF2'
+      url: 'https://swoo.cwa.gov.tw/'
+      terms: '須另行申請授權'
     status: planned
     provides: [FOF2]
     cadence_s: 900

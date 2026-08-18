@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import ssl
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -19,9 +20,39 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
+import certifi
 import requests
 
 from swx_core import SourceSpec, SwxStore, apply_quality, empty_frame
+
+
+class _RelaxedStrictAdapter(requests.adapters.HTTPAdapter):
+    """關閉 X.509 STRICT 一致性檢查的 HTTPS 轉接器。
+
+    **這不是關閉憑證驗證。** 憑證鏈仍會對 CA 信任庫完整驗證，主機名仍會比對；
+    唯一放寬的是 RFC 5280 對憑證擴充欄位的嚴格一致性檢查。
+
+    為何需要：Python 3.12 起預設開啟 `VERIFY_X509_STRICT`，會拒絕中介憑證
+    缺少 Subject Key Identifier 的憑證鏈。部分政府機關的 CA（實測 TAIWAN-CA）
+    屬此情形——curl 與瀏覽器可通，Python 不通。這是對方憑證的一致性問題，
+    不是信任問題。
+
+    刻意做成**逐來源明示啟用**（sources.yaml 的 `tls_relaxed_strict: true`），
+    不做成全域預設：全域關閉會讓未來任何一個真正有問題的憑證安靜通過。
+    """
+
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = ssl.create_default_context(cafile=certifi.where())
+        ctx.verify_flags &= ~ssl.VERIFY_X509_STRICT
+        kwargs["ssl_context"] = ctx
+        return super().init_poolmanager(*args, **kwargs)
+
+
+def _session_for(spec: SourceSpec) -> requests.Session:
+    sess = requests.Session()
+    if bool(spec.raw.get("tls_relaxed_strict", False)):
+        sess.mount("https://", _RelaxedStrictAdapter())
+    return sess
 
 
 @dataclass
@@ -80,7 +111,8 @@ class Connector(ABC):
         if self.spec.endpoint:
             for attempt in range(1, self.retry_attempts + 1):
                 try:
-                    resp = requests.get(self.spec.endpoint, timeout=self.timeout_s)
+                    with _session_for(self.spec) as sess:
+                        resp = sess.get(self.spec.endpoint, timeout=self.timeout_s)
                     resp.raise_for_status()
                     return resp.content, "remote"
                 except Exception as exc:  # noqa: BLE001 - 需容忍任何網路層例外
