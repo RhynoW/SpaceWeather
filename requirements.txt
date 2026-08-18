@@ -10,6 +10,7 @@ numpy>=1.26
 # 設定與擷取
 PyYAML>=6.0
 requests>=2.31
+certifi>=2024.2        # base.py 直接引用（放寬 X.509 STRICT 用的 CA 束）
 
 # 物理模型
 pymsis>=0.10          # 熱氣層密度 NRLMSIS

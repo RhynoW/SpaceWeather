@@ -105,6 +105,88 @@ def age_badge(age_s: float | None) -> str:
 
 
 
+
+# ── 影像呈現 ────────────────────────────────────────────────────────────
+def image_url(item: dict) -> str:
+    """加上快取破除參數。
+
+    這些端點的檔名固定（latest.jpg），瀏覽器會沿用快取而顯示舊圖——
+    使用者以為看的是即時影像，實際上可能是幾小時前的。
+    以「當前時間對更新週期取整」當參數：同一個更新週期內共用快取（不浪費頻寬），
+    跨週期就強制重抓。
+    """
+    cadence = int(item.get("cadence_s") or 900)
+    bucket = int(datetime.now(timezone.utc).timestamp() // cadence)
+    sep = "&" if "?" in item["url"] else "?"
+    return f"{item['url']}{sep}_ts={bucket}"
+
+
+def _attr_line(item: dict) -> str:
+    a = item.get("attribution", {})
+    return (f"來源：{a.get('provider', '未標註')}　"
+            f"[原始網址]({a.get('url', '')})　｜{a.get('terms', '')}")
+
+
+def render_image_card(item: dict, *, compact: bool = False) -> None:
+    """單張影像卡。**來源標註與影像同框**，不摺疊、不移到頁尾。"""
+    st.markdown(f"**{item['title']}**")
+    st.caption(item.get("instrument", ""))
+    try:
+        st.image(image_url(item), width='stretch')
+    except Exception:
+        # 封閉網路或對方站台異常時，明確說「載入失敗」而非留白
+        st.warning(f"影像無法載入：{item.get('instrument', item['title'])}")
+    if not compact and item.get("note"):
+        st.markdown(
+            f"<div style='font-size:13px;line-height:1.6'>{item['note']}</div>",
+            unsafe_allow_html=True)
+    st.caption(_attr_line(item))
+
+
+@st.cache_data(ttl=600)
+def _imagery_safe() -> list[dict]:
+    try:
+        return imagery()
+    except Exception:
+        return []
+
+
+def images_by_id(*ids: str) -> list[dict]:
+    index = {i["id"]: i for i in _imagery_safe()}
+    return [index[i] for i in ids if i in index]
+
+
+def render_current_sun() -> None:
+    """當前太陽三連圖：黑子、日珥、磁圖。
+
+    這三個波段刻意選在一起：白光看**有沒有黑子**、304Å 看**會不會噴**、
+    磁圖看**極性複不複雜**。三者合起來才回答「未來幾天風險高不高」，
+    任何單一張都不夠。
+    """
+    items = images_by_id("sdo_white_light", "sdo_euv_304", "sdo_magnetogram")
+    if not items:
+        return
+    st.subheader("當前太陽")
+    st.caption("白光看黑子有無｜304Å 看日珥會不會噴｜磁圖看極性是否複雜——三者合看才判斷得了未來風險")
+    for col, item in zip(st.columns(len(items)), items):
+        with col:
+            render_image_card(item, compact=True)
+
+
+def render_solar_wind_sim() -> None:
+    """太陽風／CME 傳播模擬。系統中少數具 1–3 天提前量的資訊。"""
+    items = images_by_id("swpc_enlil", "swpc_geospace_velocity")
+    if not items:
+        return
+    st.subheader("太陽風傳播模擬")
+    st.caption(
+        "**模式輸出，不是觀測。** 判讀重點是 CME 前緣何時抵達地球（圖中 Earth 標記）——"
+        "這是本系統少數具 1–3 天提前量的資訊，但抵達時間典型誤差達數小時至十餘小時。"
+    )
+    for col, item in zip(st.columns(len(items)), items):
+        with col:
+            render_image_card(item, compact=True)
+
 # ── 背景自動更新 ────────────────────────────────────────────────────────
 # 為什麼用背景執行緒而不是直接呼叫：完整擷取實測約 47 秒，
 # 放在頁面載入路徑上會讓每次互動都卡住。改成背景跑，
@@ -192,11 +274,11 @@ def refresh_status_line() -> None:
             st.sidebar.caption(f"上次更新：{result.summary()}")
 
     c1, c2 = st.sidebar.columns(2)
-    if c1.button("更新", disabled=running, use_container_width=True,
+    if c1.button("更新", disabled=running, width='stretch',
                  help=f"重新擷取 {len(live_sources())} 個近即時來源（約 30–50 秒，背景執行）"):
         start_refresh(force=True)
         st.rerun()
-    if c2.button("完整", disabled=running, use_container_width=True,
+    if c2.button("完整", disabled=running, width='stretch',
                  help="另含 gfz_hp30（30 分鐘解析地磁指數，單獨約 46 秒）"):
         start_refresh(force=True, include_heavy=True)
         st.rerun()
@@ -447,7 +529,7 @@ if page == "值勤模式":
             rows.append({"": badge[band], "指標": g.name,
                          "值": "—" if v is None else f"{v:g}",
                          "判讀": band})
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True)
         st.caption("判讀基準為教學參考，非系統告警門檻。詳見「名詞與判讀」頁。")
 
     st.divider()
@@ -461,6 +543,15 @@ if page == "值勤模式":
 # ── 1. 太空環境總覽 ─────────────────────────────────────────────────────
 elif page == "太空環境總覽":
     st.title("太空環境總覽")
+    st.caption(f"更新於 {datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC")
+
+    render_status_banner(get_store())
+    st.divider()
+    render_current_sun()
+    st.divider()
+    render_solar_wind_sim()
+    st.divider()
+
     st.caption(f"更新於 {datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC")
 
     nowcast = load_nowcast()
@@ -510,7 +601,7 @@ elif page == "太空環境總覽":
                                   annotation_text=f"{name} 級")
             fig.update_layout(height=210, margin=dict(l=0, r=0, t=26, b=0),
                               title=label, showlegend=True)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
     with c2:
         st.subheader("資料齡期")
@@ -559,7 +650,7 @@ elif page == "參數時序":
                       hover_data=["source_id", "quality_flag"])
         fig.update_layout(height=320, margin=dict(l=0, r=0, t=10, b=0),
                           yaxis_title=spec.unit if spec else "")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
         st.caption(
             f"{len(df)} 列｜來源 {', '.join(sorted(df['source_id'].dropna().unique()))}"
             f"｜品質 {dict(df['quality_flag'].value_counts())}"
@@ -609,7 +700,7 @@ elif page == "事件卡":
                             for i in d["impacts"]
                         ]
                     ),
-                    hide_index=True, use_container_width=True,
+                    hide_index=True, width='stretch',
                 )
                 if d["recommendations"]:
                     st.write("**建議處置**")
@@ -628,7 +719,7 @@ elif page == "事件卡":
             f"{len(unavailable)} 條規則因缺資料無法判定——這是「沒資料」而非「沒事」。"
             f"涉及網域：{', '.join(sorted(set(unavailable['domain'])))}"
         )
-    st.dataframe(status, hide_index=True, use_container_width=True)
+    st.dataframe(status, hide_index=True, width='stretch')
 
 
 # ── 4. 太陽閃焰 ─────────────────────────────────────────────────────────
@@ -668,7 +759,7 @@ elif page == "太陽閃焰":
                           annotation_text=f"{name} 級")
         fig.update_yaxes(type="log", title="W/m²")
         fig.update_layout(height=360, margin=dict(l=0, r=0, t=10, b=0))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
     if not flares.empty:
         st.subheader("閃焰事件")
@@ -680,7 +771,7 @@ elif page == "太陽閃焰":
                 "NOAA R 級": flares["value"].map(lambda v: r_scale(v) or "—"),
             }
         ).sort_values("峰值時刻 (UTC)", ascending=False)
-        st.dataframe(table, hide_index=True, use_container_width=True)
+        st.dataframe(table, hide_index=True, width='stretch')
 
     drap = store.query(["DRAP_TW_MHZ", "DRAP_MAX_MHZ"],
                        start=end - timedelta(days=lookback), end=end)
@@ -690,7 +781,7 @@ elif page == "太陽閃焰":
         fig = px.line(drap, x="valid_time", y="value", color="param_code")
         fig.update_layout(height=260, margin=dict(l=0, r=0, t=10, b=0),
                           yaxis_title="MHz")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
 
 # ── 5. 48 小時預報 ──────────────────────────────────────────────────────
@@ -732,7 +823,7 @@ elif page == "48 小時預報":
                         line=dict(dash="dot"))
     fig.add_hline(y=5, line_dash="dash", line_color="#d84315", annotation_text="G1 門檻")
     fig.update_layout(height=380, margin=dict(l=0, r=0, t=10, b=0), yaxis_title="Kp")
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
     if own.empty:
         st.info("尚未產生本系統預報。執行 "
@@ -744,7 +835,7 @@ elif page == "48 小時預報":
             fig2 = px.bar(prob, x="valid_time", y="value")
             fig2.update_layout(height=240, margin=dict(l=0, r=0, t=10, b=0),
                                yaxis_tickformat=".0%")
-            st.plotly_chart(fig2, use_container_width=True)
+            st.plotly_chart(fig2, width='stretch')
 
     st.divider()
     st.subheader("與官方預報的關係")
@@ -791,7 +882,7 @@ elif page == "地磁基準場":
     )
 
     st.subheader(f"測站參考場（IGRF-14，epoch {epoch:%Y-%m-%d}）")
-    st.dataframe(station_fields(epoch), hide_index=True, use_container_width=True)
+    st.dataframe(station_fields(epoch), hide_index=True, width='stretch')
     st.caption("LNP = 崙坪，INTERMAGNET 觀測站，中央氣象署運作。"
                "取得其即時串流即可把下方推估換成實測。")
 
@@ -817,7 +908,7 @@ elif page == "地磁基準場":
                       annotation_text="強烈擾動")
         fig.update_layout(height=340, margin=dict(l=0, r=0, t=10, b=0),
                           yaxis_title="ΔH 推估 (nT)")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
         c1, c2 = st.columns(2)
         c1.metric("期間最大壓抑", f"{proxy['dH_est_nT'].min():.0f} nT")
         c2.metric("地磁緯度縮放因子", f"{proxy['scale_factor'].iloc[0]:.4f}")
@@ -832,7 +923,7 @@ elif page == "地磁基準場":
     else:
         fig = px.line(hp, x="valid_time", y="value", color="param_code")
         fig.update_layout(height=300, margin=dict(l=0, r=0, t=10, b=0))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
     aurora = store.query("AURORA_BOUNDARY_LAT", start=end - timedelta(days=lookback), end=end)
     if not aurora.empty:
@@ -877,14 +968,14 @@ elif page == "軌道與密度修正":
         fig = px.line(dc, x="valid_time", y="storm_ratio", color="alt_band_km")
         fig.update_layout(height=340, margin=dict(l=0, r=0, t=10, b=0),
                           yaxis_title="密度倍率（相對同 F10.7 的地磁寧靜態）")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
         st.info(
             "基準為**同一 F10.7、地磁寧靜（Ap=4）**，而非太陽極小期——"
             "後者會把太陽週期當成事件效應，在太陽極大期產生十倍以上的假修正。"
             "不確定度為經驗保守值，尚未由觀測反演校準。"
         )
-        st.dataframe(dc.tail(30), hide_index=True, use_container_width=True)
+        st.dataframe(dc.tail(30), hide_index=True, width='stretch')
 
     st.divider()
     st.subheader("STK / GMAT 驅動檔")
@@ -924,7 +1015,7 @@ elif page == "資料健康":
         st.dataframe(
             show[["source_id", "param_code", "latest_valid_time", "資料齡期",
                   "n_rows", "good_rate", "degraded"]],
-            hide_index=True, use_container_width=True,
+            hide_index=True, width='stretch',
         )
 
     st.divider()
@@ -937,7 +1028,7 @@ elif page == "資料健康":
                 for s in catalog()
             ]
         ),
-        hide_index=True, use_container_width=True,
+        hide_index=True, width='stretch',
     )
 
 
@@ -979,12 +1070,12 @@ elif page == "門檻校準":
                 )
             st.caption(f"回放期間 {start:%Y-%m-%d} → {end:%Y-%m-%d}"
                        f"（{(end - start).days} 天）")
-            st.dataframe(table, hide_index=True, use_container_width=True)
+            st.dataframe(table, hide_index=True, width='stretch')
             if "per_year" in table.columns:
                 fig = px.line(table, x="threshold", y="per_year", markers=True)
                 fig.update_layout(height=300, margin=dict(l=0, r=0, t=10, b=0),
                                   yaxis_title="每年告警次數")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             st.info(
                 "判讀：`per_year` 是與需求單位討論可接受告警頻率的主要依據；"
                 "`duty_cycle_pct` 偏高代表門檻過鬆；`max_h` 過長代表遲滯設定需檢討。"
@@ -1066,7 +1157,7 @@ elif page == "名詞與判讀":
                 "時間": "—" if latest is None else f"{latest['valid_time']:%m-%d %H:%M}",
             }
         )
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True)
 
     st.divider()
     st.subheader("逐一了解")
@@ -1098,7 +1189,7 @@ elif page == "名詞與判讀":
                               annotation_text=label)
         fig.update_layout(height=320, margin=dict(l=0, r=0, t=10, b=0),
                           yaxis_title=reg[pick].unit if pick in reg else "")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
     else:
         st.info("此期間無資料。**這不代表數值正常**，只代表系統目前沒有這個通道的觀測。")
 
@@ -1168,19 +1259,7 @@ elif page == "太陽與行星際影像":
             for col, item in zip(cols, group[row_start:row_start + 2]):
                 with col:
                     with st.container(border=True):
-                        st.markdown(f"**{item['title']}**")
-                        st.caption(item.get("instrument", ""))
-                        st.image(item["url"], use_container_width=True)
-                        if item.get("note"):
-                            st.markdown(
-                                f"<div style='font-size:13px;line-height:1.6'>"
-                                f"{item['note']}</div>", unsafe_allow_html=True)
-                        attr = item.get("attribution", {})
-                        st.caption(
-                            f"來源：{attr.get('provider', '未標註')}　"
-                            f"[{attr.get('url', '')}]({attr.get('url', '')})　"
-                            f"｜{attr.get('terms', '')}"
-                        )
+                        render_image_card(item)
         st.divider()
 
 
@@ -1340,7 +1419,7 @@ elif page == "使用指南":
                 "內容": attr.get("product", ""),
                 "使用條款": attr.get("terms", ""),
             })
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True)
 
         st.subheader("影像來源")
         try:
@@ -1350,7 +1429,7 @@ elif page == "使用指南":
                 "產製者": i["attribution"].get("provider", ""),
                 "使用條款": i["attribution"].get("terms", ""),
             } for i in imagery()]
-            st.dataframe(pd.DataFrame(img_rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(img_rows), width='stretch', hide_index=True)
         except Exception as exc:
             st.error(f"影像設定載入失敗：{exc}")
 
