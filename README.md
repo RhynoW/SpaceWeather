@@ -16,6 +16,7 @@
 | [docs/operations_manual.md](docs/operations_manual.md) | **值勤手冊**（燈號判讀、15 條規則處置對照、維運指令、使用邊界） |
 | [docs/glossary.md](docs/glossary.md) | **名詞說明與參數判讀**（教育推廣、值勤判讀、常見誤讀） |
 | [docs/research_review.md](docs/research_review.md) | **依公開學術研究的強化檢視**（文獻對照、建議順序） |
+| [docs/cwa_swoo_analysis.md](docs/cwa_swoo_analysis.md) | 中央氣象署 SWOO 架構分析與介接記錄（授權依據、待確認事項） |
 
 ### 分級術語
 
