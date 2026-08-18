@@ -190,6 +190,7 @@ tools/
   cssi_compare.py        CSSI 匯出與來源實檔的逐行比對（可稽核）
   density_cross_check.py MSIS 2.1 vs NRLMSISE-00 同條件交叉比對
   make_lock.py           產生 requirements.lock
+  make_source_list.py    由 configs/ 產生資料來源清單 docx（不手工維護）
 tests/                   契約測試、規則引擎、地磁、密度測試
 docs/                    架構書、資料源盤查、驗證報告
 data/                    執行時產生（已 gitignore）
@@ -492,9 +493,15 @@ IGRF-14 基準場離線可算，不需外部資料（臺灣代表點 F≈45,007 
 ## 資料來源
 
 **引用本系統的任何數字時，須一併標註原始產製者。**
-每個資料源與影像都在 `configs/` 中帶 `attribution`
+每個資料源、影像與動畫都在 `configs/` 中帶 `attribution`
 （`provider`／`product`／`url`／`terms`），由契約測試守住不得遺漏；
 儀表板「使用指南」頁列出完整對照表。
+
+交付用的來源清單（Word）由設定檔產生、不手工維護：
+
+```bash
+python tools/make_source_list.py     # → docs/SpaceWeather資料來源清單YYYYMMDD.docx
+```
 
 影像一律**直接連結產製者網址**、不下載轉存——確保呈現的是對方當下的版本，
 也避免衍生重製散布的授權問題。
