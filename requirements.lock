@@ -1,8 +1,8 @@
-# SWX-SDA ¬Û¨ÌÂê©wÀÉ¡]ª½±µ¬Û¨Ì + »¼²¾¬Û¨Ìªº¹ê´úª©¥»¡^
-# ²£¥ÍÀô¹Ò¡GPython 3.13.9 / win32
-# ¥Î³~¡GÅı README¡u­«²{¥»¤å¼Æ¦r¡v³¹¸`ªºµ²ªG¥i¦b¥L³B­«²{¡C
-# ­«·s²£¥Í¡G python tools/make_lock.py > requirements.lock
-# «D¸ó¥­»O¨D¸Ñµ²ªG¡F¥¿¦¡¥æ¥I½Ğ§ï¥Î uv ©Î pip-tools¡C
+# SWX-SDA ç›¸ä¾é–å®šæª”ï¼ˆç›´æ¥ç›¸ä¾ + éç§»ç›¸ä¾çš„å¯¦æ¸¬ç‰ˆæœ¬ï¼‰
+# ç”¢ç”Ÿç’°å¢ƒï¼šPython 3.13.9 / win32
+# ç”¨é€”ï¼šè®“ READMEã€Œé‡ç¾æœ¬æ–‡æ•¸å­—ã€ç« ç¯€çš„çµæœå¯åœ¨ä»–è™•é‡ç¾ã€‚
+# é‡æ–°ç”¢ç”Ÿï¼š python tools/make_lock.py
+# éè·¨å¹³è‡ºæ±‚è§£çµæœï¼›æ­£å¼äº¤ä»˜è«‹æ”¹ç”¨ uv æˆ– pip-toolsã€‚
 
 altair==6.0.0
 attrs==25.4.0
@@ -62,4 +62,4 @@ urllib3==2.7.0
 watchdog==6.0.0
 Werkzeug==3.1.8
 
-# ¥¼¦w¸Ë©ó²£¥ÍÀô¹Ò¡]¿ï¥Î¬Û¨Ì¡^¡Gexceptiongroup, importlib-metadata, tomli
+# æœªå®‰è£æ–¼ç”¢ç”Ÿç’°å¢ƒï¼ˆé¸ç”¨ç›¸ä¾ï¼‰ï¼šexceptiongroup, importlib-metadata, tomli

@@ -109,6 +109,9 @@ Tompok gelap di permukaan Matahari ialah **tompok matahari**, tempat medan magne
 為什麼差這麼多？光以光速跑；質子接近光速；CME 是一大團物質，
 「只有」每秒幾百到兩千公里——聽起來很快，但太陽到地球有 1.5 億公里。
 
+**表中的時間是典型範圍，不是固定值。** 只有光速那 8 分 20 秒是幾何決定的；
+質子與 CME 的抵達時間取決於噴發速度、方向，以及太陽風的背景狀態。
+
 **所以「閃焰預警」幾乎不可能，「地磁暴預警」才做得到。**""",
         "ja": """これが宇宙天気で**いちばん大事なこと**です：
 
@@ -121,6 +124,10 @@ Tompok gelap di permukaan Matahari ialah **tompok matahari**, tempat medan magne
 なぜこんなに違うのか。光は光速、陽子はほぼ光速。
 CME は物質のかたまりなので「たった」秒速数百〜2000km です。
 速そうですが、太陽から地球までは1億5000万kmもあります。
+
+**表の時間は典型的な幅であって、決まった値ではありません。**
+幾何学的に決まっているのは光速の8分20秒だけで、
+陽子とCMEの到達時間は噴出の速度・方向と太陽風の背景状態で変わります。
 
 **だから「フレア予報」はほぼ不可能で、「磁気嵐の予報」はできるのです。**""",
         "en": """This is the **single most important idea** in space weather:
@@ -135,6 +142,10 @@ Why so different? Light travels at light speed; protons nearly so.
 A CME is a lump of matter moving at "only" a few hundred to 2000 km per second.
 That sounds fast, but the Sun is 150 million km away.
 
+**The times in the table are typical ranges, not fixed values.** Only the 8 min 20 s
+is fixed by geometry; proton and CME arrival depends on eruption speed, direction,
+and the background solar wind.
+
 **So "flare warning" is nearly impossible, while "geomagnetic storm warning" is doable.**""",
         "ms": """Ini idea **paling penting** dalam cuaca angkasa:
 
@@ -147,6 +158,10 @@ That sounds fast, but the Sun is 150 million km away.
 Mengapa berbeza? Cahaya bergerak pada laju cahaya; proton hampir sama.
 CME ialah ketulan jirim yang bergerak pada "hanya" beberapa ratus hingga 2000 km sesaat.
 Kedengaran laju, tetapi Matahari berjarak 150 juta km.
+
+**Masa dalam jadual ialah julat tipikal, bukan nilai tetap.** Hanya 8 minit 20 saat
+itu ditetapkan oleh geometri; ketibaan proton dan CME bergantung pada laju letusan,
+arah, dan keadaan latar angin suria.
 
 **Jadi "amaran suar" hampir mustahil, manakala "amaran ribut geomagnet" boleh dilakukan.**""",
     },
@@ -167,7 +182,11 @@ Kedengaran laju, tetapi Matahari berjarak 150 juta km.
 
 所以太空天氣預報員最在意的一個數字叫 **Bz**——它就是「CME 的磁場朝南還是朝北」。
 
-記一句話：**朝南才會出事。**
+記一句話：**朝南才可能出事。**
+
+但要注意：**南向 Bz 是必要條件，不是唯一條件。** 事件有多強還取決於
+磁場總強度、太陽風速度、南向持續了多久，以及地球磁層當下的狀態。
+南向但很弱、或只南向十分鐘，通常不會有明顯的地磁暴。
 
 粒子沿磁力線衝進南北極的大氣，撞擊空氣分子讓它發光——那就是**極光**。""",
         "ja": """地球そのものが大きな磁石で、磁場が外へ広がって防護シールドになり、荷電粒子の多くをはじき返します。
@@ -180,7 +199,12 @@ Kedengaran laju, tetapi Matahari berjarak 150 juta km.
 
 だから宇宙天気予報士がいちばん気にする数字が **Bz**、つまり「CME の磁場が南向きか北向きか」です。
 
-覚え方：**南向きだとまずい。**
+覚え方：**南向きだとまずいことがある。**
+
+ただし注意：**南向きの Bz は必要条件であって、それだけで決まるわけではありません。**
+嵐の強さは磁場の強さ（Bt）、太陽風の速度、南向きが続いた時間、
+そして磁気圏のその時の状態にも左右されます。
+南向きでも弱かったり、10分だけだったりすれば、はっきりした磁気嵐にはなりません。
 
 粒子が磁力線に沿って極域の大気に飛び込み、空気の分子にぶつかって光る——それが**オーロラ**です。""",
         "en": """Earth itself is a big magnet. Its field spreads outward into a shield that deflects most charged particles.
@@ -192,7 +216,12 @@ But the umbrella isn't perfect:
 
 That's why forecasters watch one number above all: **Bz** — whether the incoming field points south or north.
 
-Remember: **southward means trouble.**
+Remember: **southward means trouble is possible.**
+
+But note: **southward Bz is necessary, not sufficient.** How strong the storm gets
+also depends on the total field strength, the solar wind speed, how long the field
+stays southward, and the state of the magnetosphere at the time. A weak southward
+field, or one that lasts only ten minutes, usually produces no clear storm.
 
 Particles funnel down the field lines into the polar atmosphere and hit air molecules, making them glow — that's the **aurora**.""",
         "ms": """Bumi sendiri ialah magnet besar. Medannya merebak ke luar menjadi perisai yang menepis kebanyakan zarah bercas.
@@ -204,7 +233,12 @@ Tetapi payung ini tidak sempurna:
 
 Sebab itulah peramal memerhati satu nombor melebihi segalanya: **Bz** — sama ada medan yang masuk menghala ke selatan atau utara.
 
-Ingat: **ke selatan bermakna masalah.**
+Ingat: **ke selatan bermakna masalah mungkin berlaku.**
+
+Tetapi perhatikan: **Bz ke selatan itu perlu, tetapi tidak memadai.** Kekuatan ribut
+juga bergantung pada kekuatan medan keseluruhan, laju angin suria, berapa lama medan
+kekal ke selatan, dan keadaan magnetosfera ketika itu. Medan selatan yang lemah,
+atau yang bertahan sepuluh minit sahaja, biasanya tidak menghasilkan ribut yang jelas.
 
 Zarah menyusur garis medan ke atmosfera kutub dan melanggar molekul udara, menyebabkannya bercahaya — itulah **aurora**.""",
     },
@@ -225,7 +259,9 @@ Zarah menyusur garis medan ke atmosfera kutub dan melanggar molekul udara, menye
 - **電網**——極端情況下會在長距離電線裡感應出電流，1989 年魁北克曾因此大停電。
 
 臺灣有個特別的地方：我們的**地磁緯度只有約 19°N**（不是地理的 23.5°N），
-正好落在電離層最不穩定的「赤道異常」區。所以**臺灣的 GPS 受影響其實比想像中大**。""",
+位於低緯電離層、鄰近**赤道異常**的影響範圍。這一帶的電離層結構與變化
+有明顯的日夜與季節差異，閃爍好發於**日落後數小時**。
+所以**臺灣的 GPS 受影響比用地理緯度推想的要大**。""",
         "ja": """まずはっきりさせておきます：**宇宙天気で地球が滅びることはないし、地上の人が直接傷つくこともありません。**
 大気と磁場が危険な部分を防いでいます。影響を受けるのは**技術システム**です：
 
@@ -236,7 +272,9 @@ Zarah menyusur garis medan ke atmosfera kutub dan melanggar molekul udara, menye
 - **電力網**——極端な場合、長い送電線に電流が誘導されます。1989年のケベック大停電が有名です。
 
 台湾には特別な事情があります。**地磁気緯度が約19°N**（地理的な23.5°Nではない）で、
-電離圏が最も不安定な「赤道異常」帯に入ります。つまり**台湾の GPS は思ったより影響を受けやすい**のです。""",
+低緯度電離圏、**赤道異常**の影響範囲にあります。この帯では電離圏の構造と変化に
+昼夜・季節による明確な差があり、シンチレーションは**日没後の数時間**に起きやすいです。
+つまり**地理緯度から想像するより台湾の GPS は影響を受けやすい**のです。""",
         "en": """First, to be clear: **space weather will not destroy Earth, and it does not directly harm people on the ground.**
 The atmosphere and magnetic field block the dangerous parts. What gets affected is **technology**:
 
@@ -245,7 +283,7 @@ The atmosphere and magnetic field block the dangerous parts. What gets affected 
 - **Satellites lose altitude** — the atmosphere heats and puffs up, so low-orbit satellites feel more drag and fall faster than predicted. In 2022 a batch of SpaceX Starlink satellites failed to reach orbit for exactly this reason.
 - **Power grids** — in extreme cases currents get induced in long transmission lines. Quebec had a famous blackout in 1989.
 
-Taiwan has a special situation: our **geomagnetic latitude is only about 19°N** (not the geographic 23.5°N), which puts us in the "equatorial anomaly" belt where the ionosphere is most unstable. So **GPS in Taiwan is affected more than you would guess**.""",
+Taiwan has a special situation: our **geomagnetic latitude is only about 19°N** (not the geographic 23.5°N), placing us in the low-latitude ionosphere within reach of the **equatorial anomaly**. Ionospheric structure and variability there show marked day/night and seasonal differences, with scintillation most common in the **hours after sunset**. So **GPS in Taiwan is affected more than the geographic latitude would suggest**.""",
         "ms": """Pertama, untuk jelas: **cuaca angkasa tidak akan memusnahkan Bumi, dan tidak membahayakan manusia di darat secara langsung.**
 Atmosfera dan medan magnet menghalang bahagian berbahaya. Yang terjejas ialah **teknologi**:
 
@@ -254,7 +292,7 @@ Atmosfera dan medan magnet menghalang bahagian berbahaya. Yang terjejas ialah **
 - **Satelit kehilangan ketinggian** — atmosfera memanas dan mengembang, jadi satelit orbit rendah mengalami seretan lebih dan jatuh lebih cepat daripada jangkaan. Pada 2022, sekumpulan satelit Starlink SpaceX gagal mencapai orbit atas sebab ini.
 - **Grid kuasa** — dalam kes ekstrem, arus teraruh dalam talian penghantaran panjang. Quebec mengalami gangguan bekalan terkenal pada 1989.
 
-Taiwan mempunyai keadaan istimewa: **latitud geomagnet kita hanya sekitar 19°N** (bukan 23.5°N geografi), meletakkan kita dalam jalur "anomali khatulistiwa" di mana ionosfera paling tidak stabil. Jadi **GPS di Taiwan terjejas lebih daripada yang anda sangka**.""",
+Taiwan mempunyai keadaan istimewa: **latitud geomagnet kita hanya sekitar 19°N** (bukan 23.5°N geografi), meletakkan kita dalam ionosfera latitud rendah dalam jangkauan **anomali khatulistiwa**. Struktur dan kebolehubahan ionosfera di sana menunjukkan perbezaan siang/malam dan bermusim yang ketara, dengan sintilasi paling kerap beberapa **jam selepas matahari terbenam**. Jadi **GPS di Taiwan terjejas lebih daripada yang dicadangkan oleh latitud geografi**.""",
     },
     "s5_head": {
         "zh": "五、現在的太陽長怎樣？",
@@ -299,10 +337,14 @@ Taiwan mempunyai keadaan istimewa: **latitud geomagnet kita hanya sekitar 19°N*
         "ms": "Permainan 2　Anda jadi peramal",
     },
     "g2_intro": {
-        "zh": "看太陽風的資料，判斷會不會有地磁暴。**關鍵是 Bz 的正負**。",
-        "ja": "太陽風のデータを見て、磁気嵐が来るか判断しよう。**カギは Bz の符号**です。",
-        "en": "Look at the solar wind data and decide whether a storm is coming. **The key is the sign of Bz.**",
-        "ms": "Lihat data angin suria dan tentukan sama ada ribut akan datang. **Kuncinya ialah tanda Bz.**",
+        "zh": "看太陽風的資料，判斷會不會有地磁暴。"
+              "**Bz 要夠南向、風速也要夠快**——兩個條件都要成立。",
+        "ja": "太陽風のデータを見て、磁気嵐が来るか判断しよう。"
+              "**Bz が十分に南向きで、かつ風速も速いこと**——両方そろう必要があります。",
+        "en": "Look at the solar wind data and decide whether a storm is coming. "
+              "**Bz must be sufficiently southward AND the speed high enough** — both conditions.",
+        "ms": "Lihat data angin suria dan tentukan sama ada ribut akan datang. "
+              "**Bz mesti cukup ke selatan DAN laju cukup tinggi** — kedua-dua syarat.",
     },
     "g3_title": {
         "zh": "遊戲 3　等級對對碰",

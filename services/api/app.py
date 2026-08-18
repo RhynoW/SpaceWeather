@@ -20,6 +20,7 @@ import pandas as pd
 from flask import Flask, jsonify, request
 
 from swx_core import SwxStore, catalog, data_origin, registry
+from swx_core.schema import OBSERVED_TYPES
 from swx_core.flare import flux_to_class, r_scale
 
 from services.exporter import drag_correction, stk_spaceweather
@@ -56,6 +57,16 @@ def _age_seconds(latest) -> float | None:
     if latest is None or pd.isna(latest):
         return None
     return (_now() - pd.Timestamp(latest)).total_seconds()
+
+
+
+def _iso_ts(value) -> str | None:
+    """pandas 時間戳 → ISO 8601（UTC，Z 結尾）。"""
+    if value is None or pd.isna(value):
+        return None
+    ts = pd.Timestamp(value)
+    ts = ts.tz_localize("UTC") if ts.tz is None else ts.tz_convert("UTC")
+    return ts.isoformat().replace("+00:00", "Z")
 
 
 def _records(df: pd.DataFrame) -> list[dict[str, Any]]:
@@ -141,14 +152,25 @@ def create_app(store: SwxStore | None = None) -> Flask:
             observed_only=request.args.get("observed_only", "false").lower() == "true",
         )
         spec = reg[param]
-        latest = df["valid_time"].max() if not df.empty else None
+        # 齡期只能由**觀測列**計算。回應可能同時含預報列，其 valid_time 在未來；
+        # 若一併取 max()，齡期會變成負值，`degraded` 的判斷式
+        # （age > 5×cadence）就永遠為假——只要有任何預報列存在，
+        # 過期的觀測通道就再也不會被標記為劣化，而那正是 degraded 的唯一用途。
+        obs = df[df["data_type"].isin(OBSERVED_TYPES)] if not df.empty else df
+        latest = obs["valid_time"].max() if not obs.empty else None
         age = _age_seconds(latest)
+        fcs = df[~df["data_type"].isin(OBSERVED_TYPES)] if not df.empty else df
         body = {
             "param": param,
             "name": spec.name_zh,
             "unit": spec.unit,
             "count": len(df),
+            "observed_count": int(len(obs)),
+            # 觀測資料的齡期。**不含預報列**，見上方註解。
             "data_age_s": None if age is None else round(age),
+            "latest_observed_utc": None if latest is None else _iso_ts(latest),
+            # 預報涵蓋到哪個時刻（無預報列時為 null），與齡期是兩件事
+            "forecast_to_utc": None if fcs.empty else _iso_ts(fcs["valid_time"].max()),
             "degraded": bool(spec.cadence_s and age and age > 5 * spec.cadence_s),
             "records": _records(df[["valid_time", "value", "quality_flag",
                                     "data_type", "source_id"]] if not df.empty else df),

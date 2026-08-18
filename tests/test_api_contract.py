@@ -142,3 +142,54 @@ def test_health_exposes_data_origin(app):
     assert origin is not None, "/health 未揭露資料來源性質"
     assert set(origin) >= {"data_origin", "is_demo", "operational"}
     assert origin["operational"] is False, "本系統目前全域皆非作業級"
+
+
+def test_data_age_excludes_forecast_rows(tmp_path):
+    """齡期只能由觀測列計算，否則 degraded 永遠不觸發。
+
+    實際發生過的缺陷：回應同時含觀測與預報列時，`max(valid_time)` 取到
+    未來的預報時刻，`data_age_s` 變成負值，於是 `age > 5×cadence` 恆為假——
+    **只要有任何預報列存在，過期的觀測通道就再也不會被標記為劣化**，
+    而那正是 degraded 的唯一用途。畫面與 API 一切正常，只是警告失效。
+    """
+    from datetime import datetime, timedelta, timezone
+
+    import pandas as pd
+
+    from swx_core import SwxStore, normalize
+
+    store = SwxStore(tmp_path)
+    now = datetime.now(timezone.utc)
+    store.write(
+        normalize(pd.DataFrame([
+            {"valid_time": pd.Timestamp(now - timedelta(hours=20)), "param_code": "KP_3H",
+             "value": 3.0, "unit": "1", "source_id": "gfz_nowcast", "data_type": "OBS"},
+            {"valid_time": pd.Timestamp(now + timedelta(hours=24)), "param_code": "KP_3H",
+             "value": 5.0, "unit": "1", "source_id": "swx_forecast", "data_type": "FCS"},
+        ])),
+        source_id="mix",
+    )
+    body = create_app(store).test_client().get("/v1/obs?param=KP_3H").get_json()
+
+    assert body["data_age_s"] > 0, f"齡期為負（{body['data_age_s']}）——取到了預報列"
+    assert 71000 < body["data_age_s"] < 73000, "齡期未對應最新觀測"
+    assert body["observed_count"] == 1
+    assert body["degraded"] is True, "20 小時前的 3 小時參數未判為劣化"
+    assert body["forecast_to_utc"] is not None, "預報涵蓋時刻未揭露"
+    assert body["latest_observed_utc"] is not None
+
+
+def test_advisory_threshold_matches_documented_wording():
+    """API 的作業性門檻必須與文件用語一致。
+
+    文件說「1–12 h 可作研究參考，>12 h 為非作業性研究預報」，
+    API 就必須是 beyond_h = 12。兩者若對不上，介接方會照錯的那個實作。
+    """
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1] / "services" / "api" / "app.py").read_text(
+        encoding="utf-8")
+    assert '"not_for_operational_use_beyond_h": 12' in src
+
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
+    assert "12 h" in readme or "12h" in readme, "README 未載明 12 小時門檻"

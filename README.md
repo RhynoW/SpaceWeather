@@ -29,15 +29,19 @@
 | R1–R5 | NOAA 無線電衰減分級 | 依 **GOES 0.1–0.8 nm X 射線峰值通量** |
 | S1–S5 | NOAA 太陽輻射風暴分級 | 依 **≥10 MeV 質子通量** |
 
-G/R/S 階梯依 **NOAA Space Weather Scales** 定義，本系統不自訂：
+G/R/S 階梯依 **[NOAA Space Weather Scales](https://www.swpc.noaa.gov/noaa-scales-explanation)**
+定義，本系統不自訂、不修改。三套尺度**各自獨立**，同一列不代表等價：
 
-| 級 | G（Kp） | R（W/m²） | S（pfu，≥10 MeV） |
-|---|---|---|---|
-| 1 | 5 | 1×10⁻⁵（M1） | 10 |
-| 2 | 6 | 5×10⁻⁵（M5） | 10² |
-| 3 | 7 | 1×10⁻⁴（X1） | 10³ |
-| 4 | 8 | 1×10⁻³（X10） | 10⁴ |
-| 5 | 9 | 2×10⁻³（X20） | 10⁵ |
+| G　地磁暴<br>（Kp，無單位） | R　無線電衰減<br>（GOES 0.1–0.8 nm 峰值，**W/m²**） | S　輻射風暴<br>（≥10 MeV 積分質子，**pfu**） |
+|---|---|---|
+| **G1** ＝ Kp 5 | **R1** ＝ 1×10⁻⁵（M1） | **S1** ＝ 10 |
+| **G2** ＝ Kp 6 | **R2** ＝ 5×10⁻⁵（M5） | **S2** ＝ 10² |
+| **G3** ＝ Kp 7 | **R3** ＝ 1×10⁻⁴（X1） | **S3** ＝ 10³ |
+| **G4** ＝ Kp 8 | **R4** ＝ 1×10⁻³（X10） | **S4** ＝ 10⁴ |
+| **G5** ＝ Kp 9 | **R5** ＝ 2×10⁻³（X20） | **S5** ＝ 10⁵ |
+
+pfu = particle flux unit（粒子·cm⁻²·s⁻¹·sr⁻¹）。
+實作階梯在 `swx_core/flare.py`，並由 `tests/test_contracts.py` 對照上表驗證。
 
 實作階梯與網域對應見 [docs/glossary.md](docs/glossary.md)，程式在 `swx_core/flare.py`。
 
@@ -48,7 +52,9 @@ G/R/S 階梯依 **NOAA Space Weather Scales** 定義，本系統不自訂：
 | `mission_level` | 本系統自訂的任務風險等級，值域 `L0`–`L4` |
 | `international_scale` | NOAA 尺度，例如 `G4`、`R3`、`S1`；未達門檻時為 `null` |
 | `impacts[].inference` | **永不為 null**，四選一：`observed`（直接觀測）／`modelled`（模型或預報輸出）／`proxy`（間接推估）／`unavailable`（判定所需資料不存在，**不代表風險為零**） |
-| `status` | 事件卡狀態機：`draft`（待人工確認）→ `issued`（已發布）→ `superseded`（已被新修訂取代）。狀態以 DB 欄位為準並覆蓋 payload 快照，故 API 讀到的一定是最新狀態 |
+| `status` | 事件卡狀態機：`draft`（待人工確認）→ `issued`（已發布）→ `superseded`（已被新修訂取代）。狀態以 DB 欄位為準並覆蓋 payload 快照；此行為由
+`tests/test_event_lifecycle.py` 驗證（發布後 `latest()` 必須回報 `issued`）。
+單一行程內的讀寫已驗證，**多行程並行寫入的競態尚未測試** |
 
 **目前實際行為與尚未實作的部分**（避免把設計誤讀為現況）：
 `status`、`revision`、`supersedes`、`issued_utc` **已由 API 回傳**；
@@ -109,8 +115,8 @@ python -m pytest tests -q
 
 上表為**開發與驗證所用的環境版本，不代表已測試過的相容範圍**——
 其他版本可能可用，但未經驗證。`requirements.txt` 只給下限；
-`requirements.lock` 提供本案相依樹的實測版本（55 個套件），
-以 `python tools/make_lock.py` 重新產生。
+`requirements.lock` 提供本案相依樹的實測版本（57 個套件），
+以 `python tools/make_lock.py` 重新產生（直接寫檔，不可用 shell 重導向——Windows 主控台為 cp950，重導向會把檔頭註解寫成亂碼）。
 
 ```bash
 pip install -r requirements.lock   # 重現本文數字時使用
@@ -128,7 +134,7 @@ pip install -r requirements.lock   # 重現本文數字時使用
 | 擷取層 | `services/ingest` | ✅ 20 個來源（17 個可運作）：CelesTrak、GFZ ×2、SWPC ×9、Kyoto、NASA OMNI2、**中央氣象署 SWOO**。其中 15 個納入背景自動更新 |
 | 資料層 | `packages/swx_core` | ✅ 雙時間軸 Parquet + DuckDB、品質三級制、44 個註冊參數 |
 | 模型層 | `packages/orbit_drag`、`packages/geomag` | ✅ 熱氣層密度／阻力（MSIS 2.1，暴時 ap 模式）＋地磁基準場（IGRF-14）；電離層 D 層吸收已接 |
-| 預報層 | `services/forecast` | ⚠️ **功能覆蓋** 1–48 h Kp 預報＋驗證擂台；**作業建議** 1–12 h 可作研究參考，24 h 以上為**非作業性研究預報** |
+| 預報層 | `services/forecast` | ⚠️ **功能覆蓋** 1–48 h Kp 預報＋驗證擂台。**任何 horizon 皆非正式作業產品**；1–12 h 可作研究參考，**>12 h 為非作業性研究預報**（與 API 的 `not_for_operational_use_beyond_h: 12` 一致） |
 | 風險層 | `services/risk_engine` | ✅ 3 網域 15 條規則、事件卡、作業狀態庫 |
 | 產品層 | `services/exporter` | ✅ STK/GMAT CSSI 驅動檔、密度修正因子表 |
 | 展示層 | `services/api`、`apps/dashboard` | ✅ REST API＋Streamlit 儀表板（含值勤模式、影像頁、使用指南與四語 STEM 教學頁），端點與頁面集合由契約測試守住，且每頁以 AppTest 實跑驗證可渲染 |
@@ -479,8 +485,9 @@ IGRF-14 基準場離線可算，不需外部資料（臺灣代表點 F≈45,007 
   但 STK 端的實際載入與傳播結果尚未做交叉比對。
 - **不對 GNSS 閃爍風險提供實測判定**：S4/ROTI/TEC 尚無資料源，
   相關規則回報 `unavailable` 而非 L0。
-- **不把 24 小時以上的預報列為作業性產品**：訓練折 POD 約 0.83、測試折僅 0.38–0.02，
-  過擬合落差在**所有 horizon** 上都存在；24h 起 BSS 轉負、48h 未通過基線門檻。
+- **任何 horizon 的預報皆非正式作業產品；超過 12 小時者不得用於作業決策**：
+  訓練折 POD 約 0.83、測試折僅 0.38–0.02，過擬合落差在**所有 horizon** 上都存在，
+  因此 1–12 h 亦僅供研究參考；24h 起 BSS 轉負、48h 未通過基線門檻。
   此告誡不只寫在文件——儀表板預報頁顯示紅色警示，`/v1/obs` 回應含本系統預報時
   帶 `advisory.code = "RESEARCH_GRADE_FORECAST"`，呼叫端讀 JSON 就看得到。
 - **不宣稱地磁基準場已與實測驗證**：IGRF 目前只通過值域合理性檢查，
@@ -503,8 +510,11 @@ IGRF-14 基準場離線可算，不需外部資料（臺灣代表點 F≈45,007 
 python tools/make_source_list.py     # → docs/SpaceWeather資料來源清單YYYYMMDD.docx
 ```
 
-影像一律**直接連結產製者網址**、不下載轉存——確保呈現的是對方當下的版本，
-也避免衍生重製散布的授權問題。
+影像一律**直接連結產製者提供的公開網址**、不下載轉存，理由是不衍生重製與再散布。
+但兩點須載明：使用時仍受各來源的 attribution／terms 與熱連結政策約束，
+若來源不允許嵌入則應改為連結其官方頁面；且**熱連結不適合稽核與重現**——
+來源更新或撤除後，歷史報告將無法重現該畫面，
+需要留存證據時應另存快照並記錄 checksum 與取得時刻。
 
 ### 動畫
 
@@ -549,8 +559,8 @@ python tools/make_source_list.py     # → docs/SpaceWeather資料來源清單YY
 | SWPC OVATION | 極光橢圓赤道側邊界緯度 | ✅ |
 | **SWPC D-RAP** | D 層吸收最高受影響頻率（全球＋臺灣） | ✅ 架構書原列 C2「需協調」，實為公開產品 |
 | Kyoto WDC Dst | 逐時 Dst | ✅ |
-| **NASA OMNI2** | 逐時 IMF 與太陽風實測；Kp／Dst／ap／F10.7 為 OMNI **併入同一時間軸的地磁與太陽活動指數**（原始產製者為 GFZ／京都／加拿大 DRAO，非 OMNI 自行觀測），1963 起 | ✅ 預報引擎的訓練資料來源。各參數的原始來源與品質標記見 `configs/sources.yaml` |
-| **中央氣象署 SWOO** | 臺灣上空 TEC、臺灣地磁擾動指數（在地實測） | ✅ 經授權介接。**非公開 API，第三方須另行取得授權** |
+| **NASA OMNI2** | 逐時**經時間位移校正與跨衛星合併**的 IMF 與太陽風資料（非單一儀器原始觀測）；Kp／Dst／ap／F10.7 為 OMNI 併入同一時間軸的地磁與太陽活動指數，原始產製者為 GFZ／WDC Kyoto／加拿大 DRAO。1963 起 | ✅ 預報引擎的訓練資料來源。各參數的原始來源與處理方式見 `configs/sources.yaml` |
+| **中央氣象署 SWOO** | CWA 以在地觀測產製的區域太空天氣產品：TWTEC（地面 GNSS 網**反演**之總電子含量）、TWDI（磁力計 ΔH 各站**中位數**） | ✅ 經授權介接。**非公開 API，第三方須另行取得授權** |
 | 地基 GNSS TEC/ROTI/S4（在地） | 電離層閃爍實測 | ⛔ 需外部協調 |
 | 區域磁力計即時串流 | 區域地磁 | ⛔ 需外部協調 |
 | 電離層探測儀 | foF2 | ⛔ 需外部協調 |
@@ -646,12 +656,23 @@ python tools/cssi_compare.py --level field   # 診斷差異落在哪一欄
 | 404 | 參數未註冊，或事件 ID 不存在 |
 | 500 | 未預期的伺服端例外，回應 `{"error": {"code": "INTERNAL_ERROR", "message": "..."}}`。**不回傳內部例外訊息**（避免洩漏路徑與 SQL 片段），詳情寫入 server log；僅 debug 模式附 `detail` |
 
+**沒有 422**：參數格式錯誤與值域錯誤一律回 400，不細分。
+呼叫端不需（也不應）針對 422 撰寫分支；日後若引入，會同步更新契約測試。
+
 **沒有 503**：資料源逾時或劣化時，本系統**仍回 200** 並在 `degraded` 與
 `data_age_s` 標示，讓呼叫端自行決定可接受的新鮮度——把「服務不可用」與
 「資料不夠新」混成同一個狀態碼會讓呼叫端無法區分。此為刻意設計，非疏漏。
 
-`/v1/obs` 帶 `data_age_s`（資料齡期秒數）與 `degraded`（是否逾越該參數的
-更新週期）；`/v1/rules` 的 `status: unavailable` 代表**該規則所需資料不存在**，
+`/v1/obs` 帶 `data_age_s`（**僅由觀測列計算**的齡期秒數）、
+`latest_observed_utc`、`forecast_to_utc`（預報涵蓋到何時，無預報時為 `null`）
+與 `degraded`（觀測是否逾越該參數的更新週期）。
+
+齡期刻意排除預報列：預報的 `valid_time` 在未來，一併取 `max()` 會讓齡期變成負值，
+`degraded` 的判斷式就永遠為假——**只要有任何預報列存在，過期的觀測通道
+就再也不會被標記為劣化**。此為實際發生過的缺陷，已由
+`tests/test_api_contract.py::test_data_age_excludes_forecast_rows` 守住。
+
+`/v1/rules` 的 `status: unavailable` 代表**該規則所需資料不存在**，
 不代表風險為零。這兩者是「沒資料」與「沒事」的區分機制。
 
 回應含本系統預報（`source_id: swx_forecast`）時，另帶 `advisory`：
@@ -736,7 +757,7 @@ python tools/cssi_compare.py --level field   # 診斷差異落在哪一欄
 | Python | 3.13.9 |
 | 作業系統 | Windows 11（另於 Linux／WSL2 可執行） |
 | 時區 | 全系統 UTC |
-| 相依鎖定 | `requirements.lock`（55 套件，單一平臺快照，非跨平臺求解） |
+| 相依鎖定 | `requirements.lock`（57 套件，單一平臺快照，非跨平臺求解） |
 | 版本識別 | **尚未在輸出中帶 `run_id`／`git_commit`／`config_hash`** |
 
 後兩項是已知缺口，非交付級的重現規格；

@@ -7,7 +7,12 @@
 這支工具從 `requirements.txt` 的直接相依出發，遞迴解析各套件自身宣告的
 `Requires-Dist`，只鎖定**實際構成本案相依樹**的部分（目前約 55 個）。
 
-    python tools/make_lock.py > requirements.lock
+    python tools/make_lock.py                    # 直接寫入 requirements.lock
+    python tools/make_lock.py --out other.lock
+
+**不要用 shell 重導向**（`> requirements.lock`）：Windows 的主控台編碼是 cp950，
+重導向會把檔頭的中文註解寫成亂碼，而檔案看起來仍然「正常」——
+只有讀取時才會炸 UnicodeDecodeError。本工具一律以 UTF-8 直接寫檔。
 
 限制（誠實載明）：
   · 版本取自**產生當下的環境**，非跨平臺求解的結果，
@@ -63,19 +68,30 @@ def resolve(names: list[str]) -> tuple[list[tuple[str, str]], list[str]]:
     return found, missing
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    ap = argparse.ArgumentParser(description="產生 requirements.lock")
+    ap.add_argument("--out", default=str(ROOT / "requirements.lock"))
+    args = ap.parse_args(argv)
+
     found, missing = resolve(direct_requirements())
-    print("# SWX-SDA 相依鎖定檔（直接相依 + 遞移相依的實測版本）")
-    print(f"# 產生環境：Python {sys.version.split()[0]} / {sys.platform}")
-    print("# 用途：讓 README「重現本文數字」章節的結果可在他處重現。")
-    print("# 重新產生： python tools/make_lock.py > requirements.lock")
-    print("# 非跨平臺求解結果；正式交付請改用 uv 或 pip-tools。")
-    print()
-    for name, version in sorted(found, key=lambda t: t[0].lower()):
-        print(f"{name}=={version}")
+    lines = [
+        "# SWX-SDA 相依鎖定檔（直接相依 + 遞移相依的實測版本）",
+        f"# 產生環境：Python {sys.version.split()[0]} / {sys.platform}",
+        "# 用途：讓 README「重現本文數字」章節的結果可在他處重現。",
+        "# 重新產生： python tools/make_lock.py",
+        "# 非跨平臺求解結果；正式交付請改用 uv 或 pip-tools。",
+        "",
+    ]
+    lines += [f"{name}=={version}"
+              for name, version in sorted(found, key=lambda t: t[0].lower())]
     if missing:
-        print()
-        print("# 未安裝於產生環境（選用相依）：" + ", ".join(sorted(set(missing))))
+        lines += ["", "# 未安裝於產生環境（選用相依）：" + ", ".join(sorted(set(missing)))]
+
+    out = Path(args.out)
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"已寫入 {out}（{len(found)} 個套件）")
     return 0
 
 
