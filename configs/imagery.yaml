@@ -178,3 +178,81 @@ images:
       provider: NOAA/NWS Space Weather Prediction Center（Geospace 模式）
       url: https://www.swpc.noaa.gov/products/geospace-geomagnetic-activity-plot
       terms: 美國政府公眾領域資料
+
+# ── 動畫 ────────────────────────────────────────────────────────────────
+# 兩種作法，依單幀大小決定，不是依偏好決定：
+#
+#   video   產製者已預先編碼好的 MP4。適合高解析度序列——SUVI 304Å 單幀
+#           1.1 MB，359 幀等於 397 MB，用瀏覽器逐幀載入不切實際。
+#           編碼過的同一段內容只要 12 MB。
+#   frames  由 SWPC 的幀索引 JSON 即時組成。適合單幀 <100 KB 的序列，
+#           好處是永遠是最新的一段，且不需要任何伺服器端編碼。
+#           WSA-Enlil 沒有官方 MP4，只能走這條。
+#
+# 取樣：frames 型別會等距抽樣到 max_frames，避免一次載入整段。
+
+animations:
+  - id: sdo_304_video
+    group: solar
+    kind: video
+    title: 日珥與色球（動畫）
+    instrument: SDO/AIA 304Å
+    url: https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_512_0304.mp4
+    approx_mb: 12
+    note: >
+      近 48 小時的連續影像。看邊緣噴發的日珥——那正是 CME 起源的樣子。
+      比靜態圖更容易看出「太陽是活的」。
+    attribution:
+      provider: NASA/SDO 與 AIA、EVE、HMI 科學團隊
+      url: https://sdo.gsfc.nasa.gov/
+      terms: 美國政府公眾領域資料；使用時請標註 NASA/SDO
+
+  - id: soho_c2_video
+    group: solar
+    kind: video
+    title: 日冕儀 CME 監視（動畫）
+    instrument: SOHO/LASCO C2
+    url: https://soho.nascom.nasa.gov/data/LATEST/current_c2.mp4
+    approx_mb: 11
+    note: >
+      CME 在此呈現為向外擴張的亮弧。**正對地球的 CME 會呈現環繞日面的暈狀**，
+      動畫比單張圖容易分辨——靜態圖上分不出是往前還是往側面噴。
+    attribution:
+      provider: ESA/NASA SOHO — LASCO 由 NRL 主持之國際團隊建造
+      url: https://soho.nascom.nasa.gov/
+      terms: 公開；使用時請標註 SOHO（ESA & NASA）
+
+  - id: enlil_frames
+    group: solarwind
+    kind: frames
+    title: 太陽風／CME 傳播模擬（動畫）
+    instrument: NOAA SWPC WSA-Enlil
+    index_url: https://services.swpc.noaa.gov/products/animations/enlil.json
+    base_url: https://services.swpc.noaa.gov
+    max_frames: 60
+    fps: 8
+    note: >
+      **模式輸出，不是觀測。** 涵蓋過去數日至未來數日。
+      看 CME 前緣何時掃過標記 Earth 的位置——動畫是判讀抵達時間最直接的方式。
+      無官方 MP4，此動畫由 SWPC 的幀索引即時組成。
+    attribution:
+      provider: NOAA/NWS Space Weather Prediction Center（WSA-Enlil，Enlil 模式由 D. Odstrcil 開發）
+      url: https://www.swpc.noaa.gov/products/wsa-enlil-solar-wind-prediction
+      terms: 美國政府公眾領域資料
+
+  - id: lasco_c2_frames
+    group: solar
+    kind: frames
+    title: 日冕儀近況（逐幀）
+    instrument: SOHO/LASCO C2
+    index_url: https://services.swpc.noaa.gov/products/animations/lasco-c2.json
+    base_url: https://services.swpc.noaa.gov
+    max_frames: 48
+    fps: 10
+    note: >
+      SWPC 轉發的 LASCO C2 幀序列，較上方 MP4 更即時（MP4 每日更新一次）。
+      可用滑桿逐幀檢視，找出 CME 開始擴張的那一刻。
+    attribution:
+      provider: NOAA/NWS SWPC 轉發；原始觀測為 ESA/NASA SOHO LASCO
+      url: https://www.swpc.noaa.gov/products/lasco-coronagraph
+      terms: 美國政府公眾領域資料；原始觀測請一併標註 SOHO（ESA & NASA）

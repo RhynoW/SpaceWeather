@@ -33,7 +33,7 @@ from services.exporter import drag_correction, stk_spaceweather  # noqa: E402
 from services.risk_engine.engine import RiskEngine, load_rules  # noqa: E402
 from services.risk_engine.eventcard import build_event_cards  # noqa: E402
 from swx_core import (  # noqa: E402
-    SwxStore, catalog, data_origin, imagery, quality_summary, registry,
+    SwxStore, animations, catalog, data_origin, imagery, quality_summary, registry,
 )
 from swx_core.flare import flux_to_class, r_scale  # noqa: E402
 
@@ -186,6 +186,164 @@ def render_solar_wind_sim() -> None:
     for col, item in zip(st.columns(len(items)), items):
         with col:
             render_image_card(item, compact=True)
+
+
+# ── 動畫呈現 ────────────────────────────────────────────────────────────
+# 兩種作法依**單幀大小**決定，不是依偏好：
+#   video   高解析度序列（SUVI 304Å 單幀 1.1 MB × 359 幀 = 397 MB）在瀏覽器
+#           逐幀載入不切實際，必須用產製者預先編碼好的 MP4（同內容 12 MB）。
+#   frames  單幀 <100 KB 的序列可即時組成，好處是永遠是最新的一段，
+#           且不需要任何伺服器端編碼。WSA-Enlil 沒有官方 MP4，只能走這條。
+
+@st.cache_data(ttl=900)
+def frame_urls(index_url: str, base_url: str, max_frames: int) -> list[str]:
+    """取幀索引並等距抽樣。
+
+    抽樣而非全取：Enlil 有 169 幀，全載約 15 MB。等距抽 60 幀仍看得出
+    CME 前緣的移動，流量降到三分之一。抽樣一定要**等距**——
+    取前 N 幀會只看到過去、取後 N 幀會只看到預測。
+    """
+    import json
+    import urllib.request
+
+    with urllib.request.urlopen(index_url, timeout=25) as resp:
+        data = json.load(resp)
+    urls = [base_url + item["url"] for item in data if item.get("url")]
+    if len(urls) <= max_frames:
+        return urls
+    step = len(urls) / max_frames
+    picked = [urls[min(len(urls) - 1, int(i * step))] for i in range(max_frames)]
+    # 末幀（最新／最遠預測）一定保留，否則看不到序列的結尾
+    if picked[-1] != urls[-1]:
+        picked[-1] = urls[-1]
+    return picked
+
+
+def _frame_player_html(urls: list[str], fps: int, height: int = 560) -> str:
+    """逐幀播放器：預載進度 → 自動播放 → 可拖曳檢視。
+
+    預載是必要的：不預載就直接播，第一輪會因逐幀下載而卡頓，
+    看起來像程式壞掉。先顯示進度、載完再播，體感差很多。
+    """
+    import json as _json
+
+    data = _json.dumps(urls)
+    delay = max(40, int(1000 / max(1, fps)))
+    return f"""
+<div style="font-family:system-ui,-apple-system,sans-serif;color:#c9d1d9">
+  <div id="wrap" style="position:relative;background:#000;border-radius:4px;
+       min-height:{height - 90}px;display:flex;align-items:center;justify-content:center">
+    <img id="frame" style="max-width:100%;max-height:{height - 90}px;display:none" alt="">
+    <div id="load" style="text-align:center;font-size:13px">
+      <div id="pct">載入中 0%</div>
+      <div style="width:220px;height:4px;background:#30363d;border-radius:2px;margin:8px auto 0">
+        <div id="bar" style="width:0%;height:100%;background:#4C9AFF;border-radius:2px"></div>
+      </div>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
+    <button id="play" style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;
+      border-radius:4px;padding:4px 14px;cursor:pointer;font-size:13px">⏸</button>
+    <input id="seek" type="range" min="0" max="{len(urls) - 1}" value="0"
+      style="flex:1;accent-color:#4C9AFF" disabled>
+    <span id="idx" style="font-size:12px;font-variant-numeric:tabular-nums;
+      min-width:64px;text-align:right;color:#8b949e">–/{len(urls)}</span>
+  </div>
+</div>
+<script>
+(function() {{
+  const urls = {data};
+  const imgs = [];
+  let ready = 0, cur = 0, playing = true, timer = null;
+  const frame = document.getElementById('frame');
+  const load = document.getElementById('load');
+  const bar = document.getElementById('bar');
+  const pct = document.getElementById('pct');
+  const seek = document.getElementById('seek');
+  const idx = document.getElementById('idx');
+  const play = document.getElementById('play');
+
+  function show(i) {{
+    cur = (i + urls.length) % urls.length;
+    if (imgs[cur] && imgs[cur].complete) frame.src = imgs[cur].src;
+    seek.value = cur;
+    idx.textContent = (cur + 1) + '/' + urls.length;
+  }}
+  function tick() {{ if (playing) show(cur + 1); }}
+
+  urls.forEach(function(u, i) {{
+    const im = new Image();
+    im.onload = im.onerror = function() {{
+      ready++;
+      const p = Math.round(ready / urls.length * 100);
+      bar.style.width = p + '%';
+      pct.textContent = '載入中 ' + p + '%';
+      if (ready === 1) {{ frame.style.display = 'block'; show(0); }}
+      if (ready === urls.length) {{
+        load.style.display = 'none';
+        seek.disabled = false;
+        timer = setInterval(tick, {delay});
+      }}
+    }};
+    im.src = u;
+    imgs[i] = im;
+  }});
+
+  seek.addEventListener('input', function() {{
+    playing = false; play.textContent = '▶'; show(parseInt(seek.value, 10));
+  }});
+  play.addEventListener('click', function() {{
+    playing = !playing; play.textContent = playing ? '⏸' : '▶';
+  }});
+}})();
+</script>
+"""
+
+
+def render_animation(item: dict) -> None:
+    """單段動畫。來源標註與內容同框，與靜態影像一致。"""
+    import streamlit.components.v1 as components
+
+    st.markdown(f"**{item['title']}**")
+    st.caption(item.get("instrument", ""))
+
+    if item.get("kind") == "video":
+        mb = item.get("approx_mb")
+        if mb:
+            st.caption(f"約 {mb} MB，載入需要一點時間")
+        try:
+            st.video(item["url"])
+        except Exception:
+            st.warning("影片無法載入")
+    else:
+        try:
+            urls = frame_urls(item["index_url"], item["base_url"],
+                              int(item.get("max_frames", 48)))
+        except Exception as exc:
+            st.warning(f"幀索引無法取得：{type(exc).__name__}")
+            urls = []
+        if urls:
+            components.html(
+                _frame_player_html(urls, int(item.get("fps", 8))), height=580)
+            st.caption(f"{len(urls)} 幀（由索引等距抽樣）")
+
+    if item.get("note"):
+        st.markdown(f"<div style='font-size:13px;line-height:1.6'>{item['note']}</div>",
+                    unsafe_allow_html=True)
+    st.caption(_attr_line(item))
+
+
+@st.cache_data(ttl=600)
+def _animations_safe() -> list[dict]:
+    try:
+        return animations()
+    except Exception:
+        return []
+
+
+def animations_by_id(*ids: str) -> list[dict]:
+    index = {a["id"]: a for a in _animations_safe()}
+    return [index[i] for i in ids if i in index]
 
 # ── 背景自動更新 ────────────────────────────────────────────────────────
 # 為什麼用背景執行緒而不是直接呼叫：完整擷取實測約 47 秒，
@@ -1235,6 +1393,21 @@ elif page == "太陽與行星際影像":
         "影像為**直接連結產製者網址**，看到的永遠是對方當下的版本，"
         "不會是我們快取的過期影像。代價是封閉網路環境無法顯示。"
     )
+    with st.expander("動畫是怎麼做出來的？"):
+        st.markdown("""
+兩種作法，**依單幀大小決定，不是依偏好決定**：
+
+| 作法 | 適用 | 為什麼 |
+|---|---|---|
+| **MP4**（`st.video`） | 高解析度序列 | SUVI 304Å 單幀 1.1 MB × 359 幀 = **397 MB**，瀏覽器逐幀載入不切實際。編碼後同一段內容只要 12 MB。NASA 與 NICT 都是這樣做 |
+| **逐幀播放器** | 單幀 < 100 KB | 由 SWPC 的幀索引 JSON 即時組成，**永遠是最新的一段**，且不需要任何伺服器端編碼。WSA-Enlil 沒有官方 MP4，只能走這條 |
+
+逐幀播放器會**等距抽樣**到設定的幀數（Enlil 169 幀 → 60 幀，流量降到三分之一）。
+抽樣必須等距——取前 N 幀只會看到過去，取後 N 幀只會看到預測。
+
+播放前先**預載全部幀並顯示進度**：不預載就直接播，第一輪會因逐幀下載而卡頓，
+看起來像程式壞掉。
+""")
 
     GROUPS = [
         ("solar", "太陽", "黑子、日珥、閃焰與日冕。判斷未來數日風險的源頭。"),
@@ -1260,6 +1433,11 @@ elif page == "太陽與行星際影像":
                 with col:
                     with st.container(border=True):
                         render_image_card(item)
+
+        anims = [a for a in _animations_safe() if a.get("group") == gid]
+        for anim in anims:
+            with st.container(border=True):
+                render_animation(anim)
         st.divider()
 
 
@@ -1477,4 +1655,5 @@ elif page == "使用指南":
 elif page == "STEM 教學":
     from stem import render as render_stem
 
-    render_stem(get_store(), registry, render_image_card, images_by_id)
+    render_stem(get_store(), registry, render_image_card, images_by_id,
+                render_animation, animations_by_id)

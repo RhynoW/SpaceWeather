@@ -420,7 +420,8 @@ def _state(key: str, default):
     return st.session_state[key]
 
 
-def render(store, registry_fn, image_card, images_by_id) -> None:
+def render(store, registry_fn, image_card, images_by_id,
+           animation_card=None, animations_by_id=None) -> None:
     """STEM 教學頁。
 
     參數以函式傳入而非 import，避免與 app.py 形成循環相依。
@@ -447,8 +448,12 @@ def render(store, registry_fn, image_card, images_by_id) -> None:
     # ── 二、速度 ──
     st.header(t("s2_head", lang))
     st.markdown(t("s2_body", lang))
-    items = images_by_id("soho_lasco_c2", "sdo_euv_304")
-    if items:
+    # 動畫比靜態圖更容易讓學生看懂「太陽是活的」與「CME 往哪裡噴」
+    if animation_card and animations_by_id:
+        for anim in animations_by_id("sdo_304_video", "soho_c2_video"):
+            animation_card(anim)
+    else:
+        items = images_by_id("soho_lasco_c2", "sdo_euv_304")
         for col, item in zip(st.columns(len(items)), items):
             with col:
                 image_card(item, compact=True)

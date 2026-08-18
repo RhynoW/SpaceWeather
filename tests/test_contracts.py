@@ -363,3 +363,56 @@ def test_heavy_sources_excluded_from_auto_refresh():
     assert not (auto & HEAVY_SOURCES), "重量級來源混入自動更新"
     assert "omni2_hourly" not in auto, "歷史回填來源混入自動更新"
     assert set(live_sources(include_heavy=True)) >= auto | HEAVY_SOURCES
+
+
+# ── 動畫來源 ────────────────────────────────────────────────────────────
+def test_every_animation_has_attribution_and_valid_kind():
+    from swx_core import animations
+
+    items = animations()
+    assert items, "動畫盤點為空"
+    for item in items:
+        attr = item.get("attribution")
+        assert attr, f"動畫 {item.get('id')} 缺少 attribution"
+        for key in ("provider", "url", "terms"):
+            assert attr.get(key), f"動畫 {item.get('id')} 的 attribution 缺 {key}"
+        assert item.get("kind") in ("video", "frames")
+        if item["kind"] == "video":
+            assert item.get("url"), f"{item['id']} 為 video 但無 url"
+        else:
+            assert item.get("index_url") and item.get("base_url"), \
+                f"{item['id']} 為 frames 但缺 index_url/base_url"
+
+
+def test_frame_sampling_is_evenly_spaced_and_keeps_both_ends():
+    """抽樣必須等距並保留頭尾。
+
+    取前 N 幀只會看到過去，取後 N 幀只會看到預測——兩者都讓動畫失去意義。
+    Enlil 的序列橫跨過去數日到未來數日，頭尾都掉了就看不出 CME 何時抵達。
+    """
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "apps" / "dashboard"))
+
+    def sample(urls, max_frames):
+        if len(urls) <= max_frames:
+            return urls
+        step = len(urls) / max_frames
+        picked = [urls[min(len(urls) - 1, int(i * step))] for i in range(max_frames)]
+        if picked[-1] != urls[-1]:
+            picked[-1] = urls[-1]
+        return picked
+
+    urls = [f"f{i:03d}" for i in range(169)]
+    got = sample(urls, 60)
+    assert len(got) == 60
+    assert got[0] == urls[0], "首幀遺失——看不到序列起點"
+    assert got[-1] == urls[-1], "末幀遺失——看不到最新／最遠預測"
+    assert got == sorted(got), "抽樣後順序錯亂"
+    gaps = [int(got[i + 1][1:]) - int(got[i][1:]) for i in range(len(got) - 2)]
+    assert max(gaps) - min(gaps) <= 1, f"抽樣不等距，間隔 {min(gaps)}–{max(gaps)}"
+
+    # 幀數少於上限時應原樣回傳
+    short = [f"f{i}" for i in range(10)]
+    assert sample(short, 60) == short

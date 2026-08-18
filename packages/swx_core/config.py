@@ -99,6 +99,30 @@ def imagery() -> list[dict]:
     return items
 
 
+@lru_cache(maxsize=2)
+def animations() -> list[dict]:
+    """動畫來源盤點（configs/imagery.yaml 的 animations 區段）。
+
+    兩種 kind：
+      video   產製者預先編碼的 MP4，直接播放
+      frames  由幀索引 JSON 即時組成，需在展示層抽樣與預載
+
+    與 imagery() 同樣強制標註：缺 attribution 直接拋錯。
+    """
+    path = config_dir() / "imagery.yaml"
+    if not path.exists():
+        return []
+    doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    items = list(doc.get("animations") or [])
+    missing = [i.get("id", "?") for i in items if not i.get("attribution")]
+    if missing:
+        raise ValueError(f"動畫來源缺少 attribution，不得呈現：{missing}")
+    bad_kind = [i.get("id") for i in items if i.get("kind") not in ("video", "frames")]
+    if bad_kind:
+        raise ValueError(f"動畫 kind 必須是 video 或 frames：{bad_kind}")
+    return items
+
+
 @dataclass(frozen=True)
 class SourceSpec:
     source_id: str
