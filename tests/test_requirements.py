@@ -23,7 +23,9 @@ IMPORT_TO_PACKAGE = {
 }
 
 # 本專案自有模組與標準庫（不需宣告）
-LOCAL = {"swx_core", "services", "geomag", "orbit_drag", "apps", "tools", "__future__"}
+# 本專案自有模組。`stem` 是 apps/dashboard 下的同層模組（由 app.py 直接 import），
+# 不是 PyPI 套件——漏列會讓相依測試誤報。
+LOCAL = {"swx_core", "services", "geomag", "orbit_drag", "apps", "tools", "stem", "__future__"}
 STDLIB = {
     "abc", "argparse", "ast", "base64", "collections", "contextlib", "copy", "csv",
     "dataclasses", "datetime", "enum", "functools", "glob", "hashlib", "importlib",

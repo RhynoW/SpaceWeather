@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-for p in (ROOT, ROOT / "packages"):
+for p in (ROOT, ROOT / "packages", Path(__file__).resolve().parent):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
@@ -380,7 +380,7 @@ page = st.sidebar.radio(
     "頁面",
     ["值勤模式", "太空環境總覽", "太陽與行星際影像", "參數時序", "事件卡",
      "太陽閃焰", "48 小時預報", "地磁基準場", "軌道與密度修正",
-     "資料健康", "門檻校準", "名詞與判讀", "使用指南"],
+     "資料健康", "門檻校準", "名詞與判讀", "使用指南", "STEM 教學"],
 )
 lookback = st.sidebar.slider("回顧天數", 1, 60, 7)
 st.sidebar.divider()
@@ -1471,3 +1471,10 @@ elif page == "使用指南":
 
 完整說明見 `docs/operations_manual.md` 與 `docs/research_review.md`。
 """)
+
+
+# ── STEM 教學（12–18 歲，多語）──────────────────────────────────────────
+elif page == "STEM 教學":
+    from stem import render as render_stem
+
+    render_stem(get_store(), registry, render_image_card, images_by_id)

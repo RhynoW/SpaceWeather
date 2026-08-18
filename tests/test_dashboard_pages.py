@@ -16,7 +16,7 @@ APP = Path(__file__).resolve().parents[1] / "apps" / "dashboard" / "app.py"
 DOCUMENTED_PAGES = [
     "值勤模式", "太空環境總覽", "太陽與行星際影像", "參數時序", "事件卡",
     "太陽閃焰", "48 小時預報", "地磁基準場", "軌道與密度修正",
-    "資料健康", "門檻校準", "名詞與判讀", "使用指南",
+    "資料健康", "門檻校準", "名詞與判讀", "使用指南", "STEM 教學",
 ]
 
 
@@ -70,3 +70,65 @@ def test_no_orphan_branches():
 def test_duty_mode_is_the_landing_page():
     """值勤模式必須排第一——事件發生時預設落地頁就是它。"""
     assert _sidebar_pages()[0] == "值勤模式"
+
+
+# ── STEM 教學頁的多語完整性 ────────────────────────────────────────────
+def test_stem_content_is_complete_in_every_language():
+    """任一語言缺一句，該語言的使用者就會看到空白或英文夾雜。
+
+    翻譯最典型的腐化方式是「新增了中文段落，忘了補其他三種」——
+    這不會報錯、不會當掉，只會讓某個語言的讀者看到殘缺內容。
+    """
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "apps" / "dashboard"))
+    from stem import G1_EXPLAIN, G1_OPTIONS, G2_NO, G2_YES, LANGS, T
+
+    codes = set(LANGS.values())
+    assert codes == {"zh", "ja", "en", "ms"}
+
+    for key, variants in T.items():
+        missing = codes - set(variants)
+        assert not missing, f"文案 {key!r} 缺少語言：{sorted(missing)}"
+        empty = [c for c in codes if not str(variants[c]).strip()]
+        assert not empty, f"文案 {key!r} 在 {empty} 為空字串"
+
+    for name, table in (("G1_OPTIONS", G1_OPTIONS), ("G1_EXPLAIN", G1_EXPLAIN),
+                        ("G2_YES", G2_YES), ("G2_NO", G2_NO)):
+        assert set(table) == codes, f"{name} 缺少語言：{sorted(codes - set(table))}"
+
+
+def test_stem_storm_rule_is_self_consistent():
+    """遊戲 2 的判定規則與解說必須一致，否則會教錯。
+
+    這個遊戲要傳達的核心是「南向 Bz 才會出事」。若判定邏輯與解說文字
+    對不上，學生會學到相反的規則——教學錯誤比程式錯誤更難發現。
+    """
+    import random
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "apps" / "dashboard"))
+    from stem import _g2_case
+
+    for seed in range(200):
+        bz, speed, storm = _g2_case(random.Random(seed))
+        if storm:
+            assert bz < 0, f"判定為地磁暴但 Bz 朝北（{bz}）——與教學規則矛盾"
+            assert speed > 450, f"判定為地磁暴但風速僅 {speed}"
+
+
+def test_stem_kp_to_g_scale_matches_noaa():
+    """遊戲 3 的 Kp → G 級對照必須符合 NOAA 定義（Kp5=G1 … Kp9=G5）。"""
+    import random
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "apps" / "dashboard"))
+    from stem import _g3_case
+
+    for seed in range(100):
+        kp, level = _g3_case(random.Random(seed))
+        assert 1 <= level <= 5
+        assert level == min(5, int(kp) - 4), f"Kp {kp} 對到 G{level}，與 NOAA 定義不符"
