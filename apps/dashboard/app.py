@@ -1435,9 +1435,24 @@ elif page == "太陽與行星際影像":
                         render_image_card(item)
 
         anims = [a for a in _animations_safe() if a.get("group") == gid]
-        for anim in anims:
-            with st.container(border=True):
-                render_animation(anim)
+        if anims:
+            st.markdown("**動畫**")
+            if len(anims) > 2:
+                # 一次疊七個播放器會讓頁面難以掃視，且各自都要抓 metadata。
+                # 改成選一支播，並在選項上標明檔案大小——按下去才知道要載 21 MB
+                # 是很差的體驗。
+                labels = {
+                    f"{a['title']}（約 {a.get('approx_mb', '?')} MB）"
+                    if a.get("kind") == "video" else f"{a['title']}（逐幀）": a
+                    for a in anims
+                }
+                pick = st.selectbox("選擇動畫", list(labels), key=f"anim_{gid}")
+                with st.container(border=True):
+                    render_animation(labels[pick])
+            else:
+                for anim in anims:
+                    with st.container(border=True):
+                        render_animation(anim)
         st.divider()
 
 
