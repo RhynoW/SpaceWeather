@@ -125,7 +125,7 @@ pip install -r requirements.lock   # 重現本文數字時使用
 
 | 層 | 模組 | 狀態 |
 |---|---|---|
-| 擷取層 | `services/ingest` | ✅ 19 個來源（16 個可運作）：CelesTrak、GFZ ×2、SWPC ×8、Kyoto、NASA OMNI2 |
+| 擷取層 | `services/ingest` | ✅ 20 個來源（17 個可運作）：CelesTrak、GFZ ×2、SWPC ×9、Kyoto、NASA OMNI2、**中央氣象署 SWOO**。其中 15 個納入背景自動更新 |
 | 資料層 | `packages/swx_core` | ✅ 雙時間軸 Parquet + DuckDB、品質三級制、44 個註冊參數 |
 | 模型層 | `packages/orbit_drag`、`packages/geomag` | ✅ 熱氣層密度／阻力（MSIS 2.1，暴時 ap 模式）＋地磁基準場（IGRF-14）；電離層 D 層吸收已接 |
 | 預報層 | `services/forecast` | ⚠️ **功能覆蓋** 1–48 h Kp 預報＋驗證擂台；**作業建議** 1–12 h 可作研究參考，24 h 以上為**非作業性研究預報** |
@@ -550,7 +550,9 @@ IGRF-14 基準場離線可算，不需外部資料（臺灣代表點 F≈45,007 
 
 「可運作」的定義：`configs/sources.yaml` 標 `status: ready`，且在最近一次
 `python -m services.ingest.run --source all` 中完成**連線 → 解析 → 品質標記 → 入庫**
-全程無錯誤。未列於上表而標 `planned` 的 3 個來源為 `tw_gnss_tec`、
+全程無錯誤。17 個可運作來源中有 **15 個納入背景自動更新**；
+`gfz_hp30`（單獨約 46 秒）與 `omni2_hourly`（六年歷史回填）排除於頁面載入路徑外，
+改由手動「完整」按鈕或排程主機處理。未列於上表而標 `planned` 的 3 個來源為 `tw_gnss_tec`、
 `tw_magnetometer`、`tw_ionosonde`，皆屬需機關協調項。
 
 執行期另有 `degraded` 狀態：來源可取得但資料齡期超過 `latency_budget_s`，
@@ -747,6 +749,25 @@ python tools/cssi_compare.py --level field   # 診斷差異落在哪一欄
 ---
 
 ## 部署
+
+### 資料更新
+
+儀表板在開站時檢查資料齡期，**超過 60 分鐘即在背景重新擷取**，不阻塞頁面：
+
+```bash
+python -m services.ingest.refresh --status          # 只看齡期與納入的來源
+python -m services.ingest.refresh --max-age-min 60  # 逾時才更新
+python -m services.ingest.refresh --force --full    # 強制，含重量級來源
+```
+
+側欄顯示齡期與更新進度，並提供「更新」（15 個快速來源，約 30–50 秒）
+與「完整」（另含 `gfz_hp30`）兩個按鈕。更新一律寫入**真實的 `data/` 目錄**，
+因此雲端首次成功更新後，示範快照的 DEMO 橫幅會自動消失。
+
+判斷齡期用的是 `ingest_time` 而非 `valid_time`——後者舊可能只是該通道本來就
+更新得慢，重抓也不會變新。且**必須排除未來時刻**：CelesTrak 月預測列的
+`valid_time` 遠到 2041 年，回填推算的 `ingest_time` 也在未來，
+不濾掉會讓齡期變負值、自動更新永遠不觸發（有測試守住）。
 
 ### Streamlit Cloud
 
