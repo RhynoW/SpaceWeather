@@ -20,6 +20,7 @@ IMPORT_TO_PACKAGE = {
     "yaml": "pyyaml",
     "sklearn": "scikit-learn",
     "flask_cors": "flask-cors",
+    "docx": "python-docx",
 }
 
 # 本專案自有模組與標準庫（不需宣告）
