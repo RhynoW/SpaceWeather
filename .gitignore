@@ -36,3 +36,12 @@ _dump.txt
 tmp/
 out/
 *.log
+
+# 授權受限來源的原始資料一律不進版控（本 repo 為公開）。
+# CWA SWOO 的資料經授權使用，但條款載明第三方不得逕行取用，
+# 把原始 JSON 提交上來等同代為散布。
+/SWInfo.json
+/SWForecast.json
+/SWxScale.json
+/get_web_*.json
+data/raw/cwa_swoo/
