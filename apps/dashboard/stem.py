@@ -349,6 +349,153 @@ Taiwan mempunyai keadaan istimewa: **latitud geomagnet kita hanya sekitar 19°N*
 }
 
 
+
+# ── 影像／動畫的多語說明 ────────────────────────────────────────────────
+# **不能沿用 configs/imagery.yaml 的 note**：那是寫給值勤人員的中文操作說明，
+# 不會隨語言切換，而且用語對 12–18 歲太專業。
+# 這裡另備一套教學用說明，四語齊備（有測試守住缺一即紅燈）。
+# 產製者名稱維持原文（專有名詞），只翻譯標籤與條款摘要。
+MEDIA: dict[str, dict[str, dict[str, str]]] = {
+    "sdo_white_light": {
+        "title": {
+            "zh": "此刻的太陽（白光）",
+            "ja": "今の太陽（可視光）",
+            "en": "The Sun right now (visible light)",
+            "ms": "Matahari sekarang (cahaya nampak)",
+        },
+        "note": {
+            "zh": "暗斑就是黑子。數數看現在有幾組——黑子多的時候，閃焰也多。",
+            "ja": "暗いしみが黒点です。今いくつあるか数えてみよう。黒点が多い時期はフレアも多くなります。",
+            "en": "The dark spots are sunspots. Count how many groups you can see — more sunspots means more flares.",
+            "ms": "Tompok gelap ialah tompok matahari. Kira berapa kumpulan yang anda nampak — lebih banyak tompok bermakna lebih banyak suar.",
+        },
+    },
+    "sdo_euv_304": {
+        "title": {
+            "zh": "色球層（紫外光 304Å）",
+            "ja": "彩層（紫外線 304Å）",
+            "en": "The chromosphere (UV 304Å)",
+            "ms": "Kromosfera (UV 304Å)",
+        },
+        "note": {
+            "zh": "約 5 萬度的氣層。邊緣伸出去的環狀結構是日珥，它爆發時常伴隨 CME。",
+            "ja": "約5万度の層です。ふちから伸びる輪のような構造がプロミネンス（紅炎）で、爆発するとCMEを伴うことがよくあります。",
+            "en": "A layer at about 50,000°C. The loops reaching off the edge are prominences — when they erupt, a CME often follows.",
+            "ms": "Lapisan pada kira-kira 50,000°C. Gelung yang menjulur di tepi ialah prominens — apabila ia meletus, CME sering menyusul.",
+        },
+    },
+    "soho_lasco_c2": {
+        "title": {
+            "zh": "日冕儀（遮住太陽才看得到）",
+            "ja": "コロナグラフ（太陽を隠して見る）",
+            "en": "Coronagraph (blocking the Sun to see around it)",
+            "ms": "Koronagraf (menutup Matahari untuk melihat sekelilingnya)",
+        },
+        "note": {
+            "zh": "中間的圓盤是人造遮罩，擋住刺眼的日面。向外擴張的亮弧就是 CME。",
+            "ja": "中央の円盤は人工のマスクで、まぶしい太陽面を隠しています。外へ広がる明るい弧がCMEです。",
+            "en": "The disc in the middle is an artificial mask hiding the blinding solar surface. The bright arcs expanding outward are CMEs.",
+            "ms": "Cakera di tengah ialah topeng buatan yang menutup permukaan Matahari yang menyilaukan. Lengkok terang yang mengembang ke luar ialah CME.",
+        },
+    },
+    "swpc_ovation_north": {
+        "title": {
+            "zh": "極光橢圓（北半球）",
+            "ja": "オーロラオーバル（北半球）",
+            "en": "The auroral oval (northern hemisphere)",
+            "ms": "Bujur aurora (hemisfera utara)",
+        },
+        "note": {
+            "zh": "**這是電腦算的，不是照片。** 擾動越強，這個環就往赤道擴張得越低。",
+            "ja": "**これはコンピュータの計算結果で、写真ではありません。** 擾乱が強いほど、この輪は赤道側へ広がります。",
+            "en": "**This is a computer model, not a photograph.** The stronger the disturbance, the further this ring spreads toward the equator.",
+            "ms": "**Ini model komputer, bukan gambar foto.** Lebih kuat gangguan, lebih jauh cincin ini merebak ke arah khatulistiwa.",
+        },
+    },
+    "sdo_304_video": {
+        "title": {
+            "zh": "太陽是活的（動畫）",
+            "ja": "太陽は生きている（動画）",
+            "en": "The Sun is alive (video)",
+            "ms": "Matahari itu hidup (video)",
+        },
+        "note": {
+            "zh": "近兩天的連續影像。看邊緣的日珥怎麼升起、扭轉、噴出去——靜態圖看不到這些。",
+            "ja": "ここ2日ほどの連続画像です。ふちのプロミネンスが立ち上がり、ねじれ、噴き出す様子を見てみよう。静止画では分かりません。",
+            "en": "Two days of continuous images. Watch the prominences at the edge rise, twist, and erupt — a still image can't show this.",
+            "ms": "Dua hari imej berterusan. Perhatikan prominens di tepi naik, berpintal, dan meletus — imej pegun tidak dapat menunjukkan ini.",
+        },
+    },
+    "soho_c2_video": {
+        "title": {
+            "zh": "CME 噴發（動畫）",
+            "ja": "CMEの噴出（動画）",
+            "en": "A CME erupting (video)",
+            "ms": "CME meletus (video)",
+        },
+        "note": {
+            "zh": "動畫才分得出 CME 是往我們噴還是往旁邊噴。**環繞整圈的（暈狀）就是朝著地球來的。**",
+            "ja": "CMEがこちらへ向かっているのか横へそれているのかは、動画でないと分かりません。**全体を取り囲むように見える（ハロー型）ものが地球方向です。**",
+            "en": "Only in motion can you tell whether a CME is heading toward us or off to the side. **One that surrounds the whole disc (a halo) is coming at Earth.**",
+            "ms": "Hanya dalam gerakan anda dapat tahu sama ada CME menuju ke arah kita atau ke tepi. **Yang mengelilingi seluruh cakera (halo) sedang menuju ke Bumi.**",
+        },
+    },
+}
+
+SOURCE_LABEL = {"zh": "來源", "ja": "出典", "en": "Source", "ms": "Sumber"}
+LOAD_FAIL = {
+    "zh": "影像無法載入", "ja": "画像を読み込めません",
+    "en": "Image could not load", "ms": "Imej tidak dapat dimuatkan",
+}
+VIDEO_SIZE = {
+    "zh": "約 {mb} MB，載入需要一點時間",
+    "ja": "約 {mb} MB。読み込みに少し時間がかかります",
+    "en": "About {mb} MB — it takes a moment to load",
+    "ms": "Kira-kira {mb} MB — perlu masa sedikit untuk dimuatkan",
+}
+MODEL_TAG = {
+    "zh": "模式輸出", "ja": "モデル計算", "en": "model output", "ms": "output model",
+}
+
+
+def media_card(item: dict, lang: str, *, is_video: bool = False) -> None:
+    """STEM 用的影像／動畫卡：說明隨語言切換，來源仍與內容同框。
+
+    產製者名稱與網址保持原文（專有名詞），只翻譯標籤與條款摘要——
+    把 "NASA/SDO" 翻成中文反而讓人查不到出處。
+    """
+    meta = MEDIA.get(item.get("id", ""), {})
+    title = meta.get("title", {}).get(lang) or item.get("title", "")
+    note = meta.get("note", {}).get(lang) or ""
+
+    st.markdown(f"**{title}**")
+    st.caption(item.get("instrument", ""))
+
+    if is_video:
+        mb = item.get("approx_mb")
+        if mb:
+            st.caption(VIDEO_SIZE[lang].format(mb=mb))
+        try:
+            st.video(item["url"])
+        except Exception:
+            st.warning(LOAD_FAIL[lang])
+    else:
+        try:
+            cadence = int(item.get("cadence_s") or 900)
+            bucket = int(datetime.now(timezone.utc).timestamp() // cadence)
+            sep = "&" if "?" in item["url"] else "?"
+            st.image(f"{item['url']}{sep}_ts={bucket}", width='stretch')
+        except Exception:
+            st.warning(LOAD_FAIL[lang])
+
+    if note:
+        st.markdown(f"<div style='font-size:13px;line-height:1.6'>{note}</div>",
+                    unsafe_allow_html=True)
+
+    attr = item.get("attribution", {})
+    st.caption(f"{SOURCE_LABEL[lang]}：{attr.get('provider', '')}　"
+               f"[{attr.get('url', '')}]({attr.get('url', '')})")
+
 def t(key: str, lang: str) -> str:
     return T.get(key, {}).get(lang, T.get(key, {}).get("en", key))
 
@@ -441,7 +588,7 @@ def render(store, registry_fn, image_card, images_by_id,
     with col_img:
         items = images_by_id("sdo_white_light")
         if items:
-            image_card(items[0], compact=True)
+            media_card(items[0], lang)
 
     st.divider()
 
@@ -449,14 +596,15 @@ def render(store, registry_fn, image_card, images_by_id,
     st.header(t("s2_head", lang))
     st.markdown(t("s2_body", lang))
     # 動畫比靜態圖更容易讓學生看懂「太陽是活的」與「CME 往哪裡噴」
-    if animation_card and animations_by_id:
-        for anim in animations_by_id("sdo_304_video", "soho_c2_video"):
-            animation_card(anim)
-    else:
-        items = images_by_id("soho_lasco_c2", "sdo_euv_304")
-        for col, item in zip(st.columns(len(items)), items):
+    if animations_by_id:
+        anims = animations_by_id("sdo_304_video", "soho_c2_video")
+        for col, anim in zip(st.columns(max(1, len(anims))), anims):
             with col:
-                image_card(item, compact=True)
+                media_card(anim, lang, is_video=True)
+    items = images_by_id("soho_lasco_c2", "sdo_euv_304")
+    for col, item in zip(st.columns(max(1, len(items))), items):
+        with col:
+            media_card(item, lang)
 
     st.divider()
 
@@ -465,7 +613,7 @@ def render(store, registry_fn, image_card, images_by_id,
     st.markdown(t("s3_body", lang))
     items = images_by_id("swpc_ovation_north")
     if items:
-        image_card(items[0], compact=True)
+        media_card(items[0], lang)
 
     st.divider()
 

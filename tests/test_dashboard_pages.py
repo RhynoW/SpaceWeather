@@ -132,3 +132,54 @@ def test_stem_kp_to_g_scale_matches_noaa():
         kp, level = _g3_case(random.Random(seed))
         assert 1 <= level <= 5
         assert level == min(5, int(kp) - 4), f"Kp {kp} 對到 G{level}，與 NOAA 定義不符"
+
+
+def test_stem_media_captions_are_multilingual():
+    """STEM 頁的影像／動畫說明必須隨語言切換。
+
+    實際發生過的錯誤：STEM 頁沿用共用影像元件，而元件顯示的是
+    configs/imagery.yaml 的 note——那是寫給值勤人員的中文操作說明，
+    切成日／英／馬來語時仍是中文。使用者看到的是半翻譯的頁面。
+
+    這條同時守住「新增教學圖片時忘了補其他三種語言」。
+    """
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "apps" / "dashboard"))
+    from stem import (
+        LANGS, LOAD_FAIL, MEDIA, MODEL_TAG, SOURCE_LABEL, VIDEO_SIZE,
+    )
+
+    codes = set(LANGS.values())
+    assert MEDIA, "STEM 未定義任何多語媒體說明"
+
+    for media_id, entry in MEDIA.items():
+        for field in ("title", "note"):
+            assert field in entry, f"{media_id} 缺 {field}"
+            missing = codes - set(entry[field])
+            assert not missing, f"{media_id}.{field} 缺少語言：{sorted(missing)}"
+            empty = [c for c in codes if not str(entry[field][c]).strip()]
+            assert not empty, f"{media_id}.{field} 在 {empty} 為空字串"
+
+    for name, table in (("SOURCE_LABEL", SOURCE_LABEL), ("LOAD_FAIL", LOAD_FAIL),
+                        ("VIDEO_SIZE", VIDEO_SIZE), ("MODEL_TAG", MODEL_TAG)):
+        assert set(table) == codes, f"{name} 缺少語言：{sorted(codes - set(table))}"
+
+
+def test_stem_media_ids_exist_in_imagery_config():
+    """STEM 引用的媒體 id 必須真的存在於 configs/imagery.yaml。
+
+    id 打錯不會報錯，只會讓那張圖與說明一起消失——頁面看起來「少了一段」。
+    """
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "apps" / "dashboard"))
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "packages"))
+    from stem import MEDIA
+    from swx_core import animations, imagery
+
+    known = {i["id"] for i in imagery()} | {a["id"] for a in animations()}
+    unknown = sorted(set(MEDIA) - known)
+    assert not unknown, f"STEM 引用了不存在的媒體 id：{unknown}"
