@@ -586,10 +586,11 @@ def media_card(item: dict, lang: str, *, is_video: bool = False) -> None:
             st.warning(LOAD_FAIL[lang])
     else:
         try:
-            cadence = int(item.get("cadence_s") or 900)
-            bucket = int(datetime.now(timezone.utc).timestamp() // cadence)
-            sep = "&" if "?" in item["url"] else "?"
-            st.image(f"{item['url']}{sep}_ts={bucket}", width='stretch')
+            # **不要在這裡重寫組網址的邏輯。** 曾經有過一份複製品，
+            # 新增動態網址類型時只改了 app.py，這裡就靜默退化成「載入失敗」。
+            from media_url import image_url
+
+            st.image(image_url(item), width='stretch')
         except Exception:
             st.warning(LOAD_FAIL[lang])
 
