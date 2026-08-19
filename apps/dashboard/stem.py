@@ -398,6 +398,69 @@ Taiwan mempunyai keadaan istimewa: **latitud geomagnet kita hanya sekitar 19°N*
 # 這裡另備一套教學用說明，四語齊備（有測試守住缺一即紅燈）。
 # 產製者名稱維持原文（專有名詞），只翻譯標籤與條款摘要。
 MEDIA: dict[str, dict[str, dict[str, str]]] = {
+    "sdo_euv_094": {
+        "title": {
+            "zh": "閃焰正在發生嗎？（極紫外 94Å）",
+            "ja": "フレアは起きている？（極端紫外線 94Å）",
+            "en": "Is a flare happening? (extreme ultraviolet, 94A)",
+            "ms": "Adakah suar sedang berlaku? (ultraungu melampau, 94A)",
+        },
+        "note": {
+            "zh": "這個波段只看得到約 600 萬度的電漿。畫面突然冒出亮點，就是閃焰正在爆發。"
+                  "它的光 8 分鐘就到地球——所以你看到的時候，影響已經同時發生了。",
+            "ja": "この波長では約 600 万度のプラズマだけが見えます。突然明るい点が現れたら、"
+                  "それがフレアです。光は 8 分で地球に届くので、見えた時にはもう届いています。",
+            "en": "This wavelength shows only plasma near 6 million degrees. A sudden bright "
+                  "point is a flare erupting. Its light takes 8 minutes to reach Earth, so by "
+                  "the time you see it, the effect has already arrived.",
+            "ms": "Panjang gelombang ini hanya menunjukkan plasma sekitar 6 juta darjah. "
+                  "Titik terang yang muncul tiba-tiba ialah suar. Cahayanya mengambil masa "
+                  "8 minit sahaja untuk sampai ke Bumi.",
+        },
+    },
+    "sdo_magnetogram": {
+        "title": {
+            "zh": "太陽的磁場長什麼樣子",
+            "ja": "太陽の磁場を見る",
+            "en": "What the Sun's magnetic field looks like",
+            "ms": "Rupa medan magnet Matahari",
+        },
+        "note": {
+            "zh": "黑與白是磁場的兩個極性，就像磁鐵的 N 極和 S 極。"
+                  "黑白在同一塊區域纏得越亂，越容易爆發大閃焰——這是預判用的形態線索。",
+            "ja": "白と黒は磁場の N 極と S 極にあたります。同じ場所で白と黒が複雑に"
+                  "入り組んでいるほど、大きなフレアが起きやすくなります。",
+            "en": "Black and white are the two magnetic polarities, like the N and S poles of "
+                  "a magnet. The more tangled they are within one region, the more likely a "
+                  "large flare — this is a shape clue used for prediction.",
+            "ms": "Hitam dan putih ialah dua kutub magnet, seperti kutub U dan S pada magnet. "
+                  "Semakin berselirat kedua-duanya dalam satu kawasan, semakin besar "
+                  "kemungkinan suar besar berlaku.",
+        },
+    },
+    "himawari_fulldisk": {
+        "title": {
+            "zh": "從太空看地球的天氣",
+            "ja": "宇宙から見た地球の天気",
+            "en": "Earth's weather seen from space",
+            "ms": "Cuaca Bumi dilihat dari angkasa",
+        },
+        "note": {
+            "zh": "這是氣象衛星看到的地球——雲、颱風、晝夜的交界線。"
+                  "現在對照一下：太空天氣**沒有雲可以看**，卻會讓無線電中斷、衛星定位飄移。"
+                  "同樣是從太空看地球，兩者回答的是不同的問題。",
+            "ja": "気象衛星が見た地球です——雲、台風、昼と夜の境目。比べてみよう："
+                  "宇宙天気には見える雲がありませんが、無線が途切れたり測位がずれたりします。"
+                  "同じ宇宙からの観測でも、答える問いが違います。",
+            "en": "This is Earth as a weather satellite sees it — clouds, typhoons, the "
+                  "day-night line. Now compare: space weather has no clouds to see, yet it "
+                  "can cut off radio and shift satellite positioning. Same vantage point, "
+                  "different question.",
+            "ms": "Inilah Bumi seperti dilihat oleh satelit cuaca — awan, taufan, garis "
+                  "siang-malam. Bandingkan: cuaca angkasa tiada awan untuk dilihat, namun "
+                  "ia boleh memutuskan radio dan menyesatkan kedudukan satelit.",
+        },
+    },
     "sdo_white_light": {
         "title": {
             "zh": "此刻的太陽（白光）",
@@ -643,6 +706,14 @@ def render(store, registry_fn, image_card, images_by_id,
         if items:
             media_card(items[0], lang)
 
+    # 三張要合起來看：白光看**有沒有**黑子、94Å 看**現在有沒有在爆**、
+    # 磁圖看**極性亂不亂**。單獨一張都回答不了「接下來會不會出事」。
+    trio = images_by_id("sdo_euv_094", "sdo_magnetogram")
+    if trio:
+        for col, item in zip(st.columns(len(trio)), trio):
+            with col:
+                media_card(item, lang)
+
     st.divider()
 
     # ── 二、速度 ──
@@ -654,10 +725,9 @@ def render(store, registry_fn, image_card, images_by_id,
         for col, anim in zip(st.columns(max(1, len(anims))), anims):
             with col:
                 media_card(anim, lang, is_video=True)
-    items = images_by_id("soho_lasco_c2", "sdo_euv_304")
-    for col, item in zip(st.columns(max(1, len(items))), items):
-        with col:
-            media_card(item, lang)
+    # 這裡原本又放了 soho_lasco_c2 與 sdo_euv_304 的靜態圖，
+    # 但上面兩段動畫拍的就是同樣兩個主題——同一畫面連續出現兩次，
+    # 學生會以為是不同的東西。動畫在教學上較有效，故只留動畫。
 
     st.divider()
 
@@ -673,6 +743,12 @@ def render(store, registry_fn, image_card, images_by_id,
     # ── 四、影響 ──
     st.header(t("s4_head", lang))
     st.markdown(t("s4_body", lang))
+
+    # 對照組：氣象衛星看得到雲，太空天氣沒有雲可看卻照樣造成影響。
+    # 這個對比是本頁最想留給學生的一件事。
+    items = images_by_id("himawari_fulldisk")
+    if items:
+        media_card(items[0], lang)
 
     st.divider()
 

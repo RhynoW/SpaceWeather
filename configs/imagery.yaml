@@ -191,8 +191,30 @@ images:
 #
 # 取樣：frames 型別會等距抽樣到 max_frames，避免一次載入整段。
 
+  - id: himawari_fulldisk
+    group: earth
+    kind: latest_json
+    title: 從太空看地球的天氣（向日葵九號）
+    instrument: Himawari-9 / AHI True Color
+    # 網址帶時間戳，沒有固定的 latest.jpg。先讀索引取最新時刻再組出網址。
+    latest_url: https://himawari8.nict.go.jp/img/D531106/latest.json
+    url_template: https://himawari8.nict.go.jp/img/D531106/1d/550/{Y}/{M}/{D}/{hhmmss}_0_0.png
+    cadence_s: 600
+    note: >
+      **這是氣象，不是太空天氣。** 看得到雲、颱風與晝夜交界，
+      看不到本系統關注的太陽風、地磁擾動與電離層變化——
+      後者沒有可見的雲，卻會讓 HF 通信中斷、GNSS 定位飄移。
+      並陳的用意正在於此：同樣從太空觀測地球，兩者回答的是不同的問題。
+      另需注意，靜止氣象衛星本身也是太空天氣的受影響對象。
+      每 10 分鐘更新一次，為全球面盤真彩色合成。
+    attribution:
+      provider: 情報通信研究機構（NICT）／氣象衛星向日葵九號（日本氣象廳）
+      url: https://himawari8.nict.go.jp/
+      terms: NICT 提供之公開即時影像；使用時請標註 NICT 與日本氣象廳（JMA）
+
 animations:
   - id: sdo_304_video
+    still_of: sdo_euv_304
     group: solar
     kind: video
     title: 日珥與色球（動畫）
@@ -208,6 +230,7 @@ animations:
       terms: 美國政府公眾領域資料；使用時請標註 NASA/SDO
 
   - id: soho_c2_video
+    still_of: soho_lasco_c2
     group: solar
     kind: video
     title: 日冕儀 CME 監視（動畫）
@@ -223,6 +246,7 @@ animations:
       terms: 公開；使用時請標註 SOHO（ESA & NASA）
 
   - id: sdo_sunspot_video
+    still_of: sdo_white_light
     group: solar
     kind: video
     title: 太陽黑子（動畫）
@@ -239,6 +263,7 @@ animations:
       terms: 美國政府公眾領域資料；使用時請標註 NASA/SDO
 
   - id: sdo_magnetogram_video
+    still_of: sdo_magnetogram
     group: solar
     kind: video
     title: 光球磁圖（動畫）
@@ -255,6 +280,7 @@ animations:
       terms: 美國政府公眾領域資料；使用時請標註 NASA/SDO
 
   - id: sdo_flare_video
+    still_of: sdo_euv_094
     group: solar
     kind: video
     title: 閃焰（動畫，EUV 94Å）
@@ -301,6 +327,7 @@ animations:
       terms: 公開；使用時請標註 SOHO（ESA & NASA）
 
   - id: enlil_frames
+    still_of: swpc_enlil
     group: solarwind
     kind: frames
     title: 太陽風／CME 傳播模擬（動畫）
@@ -319,6 +346,7 @@ animations:
       terms: 美國政府公眾領域資料
 
   - id: lasco_c2_frames
+    still_of: soho_lasco_c2
     group: solar
     kind: frames
     title: 日冕儀近況（逐幀）

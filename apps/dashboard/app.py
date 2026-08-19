@@ -131,10 +131,35 @@ def image_url(item: dict) -> str:
     以「當前時間對更新週期取整」當參數：同一個更新週期內共用快取（不浪費頻寬），
     跨週期就強制重抓。
     """
+    if item.get("kind") == "latest_json":
+        return _latest_json_image(item["latest_url"], item["url_template"],
+                                  int(item.get("cadence_s") or 600))
     cadence = int(item.get("cadence_s") or 900)
     bucket = int(datetime.now(timezone.utc).timestamp() // cadence)
     sep = "&" if "?" in item["url"] else "?"
     return f"{item['url']}{sep}_ts={bucket}"
+
+
+@st.cache_data(ttl=300)
+def _latest_json_image(latest_url: str, template: str, cadence_s: int) -> str:
+    """由索引 JSON 的時刻組出影像網址。
+
+    有些產製者不提供固定的 `latest.jpg`，只給一份帶時刻的索引
+    （NICT 的向日葵影像即是）。此時必須先讀索引再組網址，
+    寫死某個時刻的網址會在下一個更新週期就失效。
+
+    `cadence_s` 只用來決定快取分桶——索引本身也要跟著更新週期重抓，
+    否則會一直組出同一張舊圖。
+    """
+    import json
+    import urllib.request
+
+    with urllib.request.urlopen(latest_url, timeout=25) as resp:
+        date = json.load(resp)["date"]          # 'YYYY-MM-DD HH:MM:SS'
+    return template.format(
+        Y=date[0:4], M=date[5:7], D=date[8:10],
+        hhmmss=date[11:13] + date[14:16] + date[17:19],
+    )
 
 
 def _attr_line(item: dict) -> str:
@@ -1507,6 +1532,8 @@ elif page == "太陽與行星際影像":
         ("solarwind", "太陽風與行星際傳播", "CME 何時抵達地球——少數具 1–3 天提前量的資訊。"),
         ("ionosphere", "電離層", "直接影響 HF 通信與 GNSS 定位的一層。"),
         ("geospace", "地球空間", "太陽風與磁層的交互作用。"),
+        ("earth", "地球大氣（對照組）",
+         "氣象衛星看到的天氣。放在這裡是為了對照——**雲看得見，太空天氣看不見**。"),
     ]
     try:
         items = imagery()
