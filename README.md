@@ -140,7 +140,7 @@ pip install -r requirements.lock   # 重現本文數字時使用
 |---|---|---|
 | 擷取層 | `services/ingest` | ✅ 22 個來源（19 個可運作）：CelesTrak、GFZ ×2、SWPC ×9、Kyoto、NASA OMNI2、**中央氣象署 SWOO**、**福衛七號 TACC ×2**（閃爍 `scn1c2`、精密定軌 `leoOrb`）。其中 15 個納入背景自動更新 |
 | 資料層 | `packages/swx_core` | ✅ 雙時間軸 Parquet + DuckDB、品質三級制、46 個註冊參數 |
-| 模型層 | `packages/orbit_drag`、`packages/geomag` | ✅ 熱氣層密度／阻力（MSIS 2.1，暴時 ap 模式）＋地磁基準場（IGRF-14）；電離層 D 層吸收已接 |
+| 模型層 | `packages/orbit_drag`、`packages/geomag` | ✅ 熱氣層密度／阻力（MSIS 2.1，暴時 ap 模式）＋地磁基準場（IGRF-14）＋TEME↔ITRF 框架轉換（含 EOP，對 astropy 8.0.1 驗證至 0.08 m）；電離層 D 層吸收已接 |
 | 預報層 | `services/forecast` | ⚠️ **功能覆蓋** 1–48 h Kp 預報＋驗證擂台。**任何 horizon 皆非正式作業產品**；1–12 h 可作研究參考，**>12 h 為非作業性研究預報**（與 API 的 `not_for_operational_use_beyond_h: 12` 一致） |
 | 風險層 | `services/risk_engine` | ✅ 3 網域 19 條規則、事件卡、作業狀態庫 |
 | 產品層 | `services/exporter` | ✅ STK/GMAT CSSI 驅動檔、密度修正因子表 |
@@ -153,7 +153,8 @@ pip install -r requirements.lock   # 重現本文數字時使用
 | 模組 | 成熟度 | 已完成的驗證 | 主要限制 | 證據 |
 |---|---|---|---|---|
 | CSSI 驅動檔匯出 | 格式已驗證 | 對 CelesTrak 實檔逐行比對，排除當日更新列後 2,054/2,054 一致 | STK 實際載入未驗證 | `tests/test_contracts.py` |
-| 密度修正因子 | 原型 | 單元測試、前視洩漏檢查、基準污染檢查 | 未與精密星曆反演密度交叉校準 | `tests/test_density.py` |
+| 密度修正因子 | 原型 | 單元測試、前視洩漏檢查、基準污染檢查；**已與福衛七號精密定軌反演的密度交叉比對**（2024-04-29–05-20，83 個 6 小時分箱） | 比對顯示**模式的暴時響應被壓縮**（觀測增強 <1.5 時比值 0.85、≥3.5 時 1.70）；僅一個事件窗、單一高度，且兩條基線間可能有常數偏移，故**只有單調趨勢可引用**，個別絕對值不可 | `tools/density_obs_vs_model.py` |
+| 實測密度判據 `DRAG_ENHANCEMENT` | 原型 | 由 leoOrb 精密定軌反演，彈道係數在比值中消掉；合成資料驗證可抵抗短週期混疊與單顆機動 | 門檻僅以一個 21 天窗（65 個寧靜樣本）標定，寧靜期最大值 1.98 幾乎貼著 L1 門檻 2.0；本參數為**尾隨量**（標在 t 的值描述 t−6h 到 t），不適合當暴起始指標 | `tests/test_tacc_leoorb.py` |
 | D-RAP 介接 | 已介接 | 解析與臺灣取樣 | 未與在地 HF 通聯實測校準 | `services/ingest/forecast_sources.py` |
 | L0–L4 分級 | 原型 | 駐留、遲滯、可用性行為測試 | 門檻未與需求單位校準（`calibrated: false`） | `tests/test_risk_engine.py` |
 | 48 小時預報 | 研究階段 | 4 折滾動起報回測、基線比較 | 未達 KPI；未與 NOAA 官方預報同場比較 | `docs/forecast_verification.md` |
@@ -165,12 +166,27 @@ pip install -r requirements.lock   # 重現本文數字時使用
 但未在目標工具上實測；`已介接` = 資料通了，尚未做效果校準；
 `原型` = 可運作但參數未校準；`研究階段` = 未達可作業水準。
 
-**尚未建置**：區域地磁擾動的在地實測（需磁力計串流）、電離層閃爍實測
-（S4/ROTI/TEC，需外部協調）、多頻段影響矩陣的實證校準、STK 端實際介接驗證。
+**尚未建置**：區域地磁擾動的在地實測（需磁力計串流）、**ROTI**（TEC 變化率指標，
+需夠高取樣率的斜距 TEC，格點 TEC 不可代用）、多頻段影響矩陣的實證校準、
+STK 端實際介接驗證。
 
-分級規則涵蓋 `ORBIT_PREDICTION`、`HF_COMM`、`GNSS_PNT` 三個網域。
-GNSS 的直接判據（S4/ROTI/TEC）尚無資料源，規則已寫好並回報 `unavailable`——
-系統刻意把「沒資料」與「沒事」分開，不會顯示綠燈誤導判讀。
+分級規則涵蓋 `ORBIT_PREDICTION`、`HF_COMM`、`GNSS_PNT` 三個網域，共 19 條。
+
+**三個網域現在都有實測判據**，但成熟度不同：
+
+| 網域 | 實測判據 | 代理判據 | 現況 |
+|---|---|---|---|
+| `HF_COMM` | GOES X 射線、質子通量 | — | 判據齊備 |
+| `GNSS_PNT` | 福衛七號掩星 S4、TEC | Kp、閃焰 | L3 需 S4＋ROTI，**只有 S4 時回報 `partial`** |
+| `ORBIT_PREDICTION` | `DRAG_ENHANCEMENT`（leoOrb 反演） | Kp、Ap | 兩組並用：Kp 給前導訊號，實測給量值 |
+
+系統刻意把「沒資料」「部分可判」「沒事」分成三態，不會顯示綠燈誤導判讀。
+`partial` 的語意是「已有的判據若超標仍會發報，但沒有告警**不等於**已確認平靜」。
+
+**實測判據不只是補齊，它會修正代理的偏差。** 2024-04-29 至 05-20 的實測顯示，
+熱氣層密度響應對 Kp 高度非線性——Kp 6–7 的增強中位僅 **1.19**，Kp ≥ 7 才到 **2.34**；
+該窗內 Kp 規則觸發 15 次、實測規則僅 4 次且全落在 Gannon 事件，
+即 **Kp 代理在中等擾動時明顯過度告警**。
 
 ---
 
@@ -490,6 +506,11 @@ IGRF-14 基準場離線可算，不需外部資料（臺灣代表點 F≈45,007 
   `is_proxy` 旗標都會傳遞到 API 與儀表板。
 - **不保證 STK/HPOP 與本系統的密度結果一致**：CSSI 驅動檔的格式已驗證，
   但 STK 端的實際載入與傳播結果尚未做交叉比對。
+- **不宣稱能給出校準過的絕對密度**：福衛七號的投影面積、阻力係數與乾重皆未公開，
+  故只做得到**相對於同一 F10.7 之寧靜期望值的比值**。`calibrated_by_observation`
+  維持 `false`；要翻成 `true` 須向 TASA／NSPO 或 UCAR 取得衛星巨觀模型。
+- **實測密度判據的門檻尚未定版**：僅以一個 21 天窗（65 個地磁寧靜樣本）標定，
+  而寧靜期實測最大值 1.98 幾乎貼著 L1 門檻 2.0，樣本增加後極可能超過。
 - **GNSS 閃爍的實測判定仍不完整**：S4 已由福衛七號掩星（`tacc_scn1c2`）提供，
   但 ROTI 仍無來源，故 `GNSS-L3-SCINT` 回報 `partial`——**該規則可發報，
   但「沒有告警」不等於確認平靜**。且掩星幾何與地面測站不同，門檻尚未校準。
@@ -569,14 +590,15 @@ python tools/make_source_list.py     # → docs/SpaceWeather資料來源清單YY
 | Kyoto WDC Dst | 逐時 Dst | ✅ |
 | **NASA OMNI2** | 逐時**經時間位移校正與跨衛星合併**的 IMF 與太陽風資料（非單一儀器原始觀測）；Kp／Dst／ap／F10.7 為 OMNI 併入同一時間軸的地磁與太陽活動指數，原始產製者為 GFZ／WDC Kyoto／加拿大 DRAO。1963 起 | ✅ 預報引擎的訓練資料來源。各參數的原始來源與處理方式見 `configs/sources.yaml` |
 | **中央氣象署 SWOO** | CWA 以在地觀測產製的區域太空天氣產品：TWTEC（地面 GNSS 網**反演**之總電子含量）、TWDI（磁力計 ΔH 各站**中位數**） | ✅ 經授權介接。**非公開 API，第三方須另行取得授權** |
-| **福衛七號 TACC** | 掩星 S4 振幅閃爍指數（`scn1c2`），取臺灣周邊並 15 分鐘分箱 | ✅ **GNSS_PNT 網域首個實測判據**。單日打包 54 MB，不納入自動更新 |
+| **福衛七號 TACC**（閃爍） | 掩星 S4 振幅閃爍指數（`scn1c2`），取臺灣周邊並 15 分鐘分箱 | ✅ **GNSS_PNT 網域首個實測判據**。單日打包 54 MB，不納入自動更新 |
+| **福衛七號 TACC**（定軌） | 精密定軌（`leoOrb`，SP3-c，60 秒節奏）反演之軌道平均阻力衰減率與密度增強倍數 | ✅ **ORBIT_PREDICTION 網域首個實測判據**。彈道係數在比值中消掉，故不需非公開的衛星參數。單日 1.4–2.2 MB，需連續多日，不納入自動更新 |
 | 地基 GNSS TEC/ROTI/S4（在地） | 電離層閃爍實測 | ⛔ 需外部協調 |
 | 區域磁力計即時串流 | 區域地磁 | ⛔ 需外部協調 |
 | 電離層探測儀 | foF2 | ⛔ 需外部協調 |
 
 「可運作」的定義：`configs/sources.yaml` 標 `status: ready`，且在最近一次
 `python -m services.ingest.run --source all` 中完成**連線 → 解析 → 品質標記 → 入庫**
-全程無錯誤。17 個可運作來源中有 **15 個納入背景自動更新**；
+全程無錯誤。19 個可運作來源中有 **15 個納入背景自動更新**；
 `gfz_hp30`（單獨約 46 秒）與 `omni2_hourly`（六年歷史回填）排除於頁面載入路徑外，
 改由手動「完整」按鈕或排程主機處理。未列於上表而標 `planned` 的 3 個來源為 `tw_gnss_tec`、
 `tw_magnetometer`、`tw_ionosonde`，皆屬需機關協調項。
@@ -763,8 +785,13 @@ S4 有了、ROTI 仍無來源，故為 `partial`——規則會在 S4 超標時�
 | 預報驗證表 | `python -m services.forecast.run --verify --splits 4` | 與 `docs/forecast_verification.md` 相同 |
 | 門檻掃描 | `python tools/whatif_threshold.py --rule ORB-L3-KP6 --param KP_3H --sweep 5,6,7,8` | Kp≥6 約每年 10.5 次 |
 | 密度模型分歧 | `python tools/density_cross_check.py` | MSIS 2.1 vs NRLMSISE-00 相差 7.3–8.8% |
+| 實測密度 vs 模式 | `python tools/density_obs_vs_model.py --start 2024-04-29 --end 2024-05-20` | 觀測 <1.5 時比值 0.85、1.5–2.5 時 1.40、≥3.5 時 1.70 |
 | 端到端鏈路 | `python tools/e2e_demo.py` | Gannon 事件判為 L4／G4 |
 | 無前視偏差回放 | `python tools/e2e_demo.py --as-of 2024-05-11T00:00Z` | 同一事件判為 L3／G3 |
+
+> 「實測密度 vs 模式」需先取得 leoOrb 資料：
+> `python -m services.ingest.run --source tacc_leoorb --date 2024.140`
+> （該來源排除於背景自動更新之外，須手動或排程執行）
 
 ### 重現條件
 
