@@ -615,8 +615,19 @@ def render(store, registry_fn, image_card, images_by_id,
 
     參數以函式傳入而非 import，避免與 app.py 形成循環相依。
     """
-    lang_label = st.selectbox("🌐 Language ／ 語言 ／ 言語 ／ Bahasa", list(LANGS), index=0)
+    # 語言也吃網址參數：`?page=stem&lang=ms` 可直接開在馬來語。
+    # 四語頁若只能靠點選切換，分享給不同語言的課堂時就得附帶操作說明。
+    _by_code = {v: k for k, v in LANGS.items()}
+    _want = str(st.query_params.get("lang", "")).strip().lower()
+    _default = _by_code.get(_want, list(LANGS)[0])
+
+    lang_label = st.selectbox(
+        "🌐 Language ／ 語言 ／ 言語 ／ Bahasa", list(LANGS),
+        index=list(LANGS).index(_default),
+    )
     lang = LANGS[lang_label]
+    if lang != _want:
+        st.query_params["lang"] = lang
 
     st.title(t("title", lang))
     st.caption(t("subtitle", lang))

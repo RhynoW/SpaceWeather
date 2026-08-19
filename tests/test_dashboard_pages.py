@@ -20,21 +20,29 @@ DOCUMENTED_PAGES = [
 ]
 
 
-def _sidebar_pages() -> list[str]:
-    """從 st.sidebar.radio 的原始碼取出頁面清單（不執行 streamlit）。"""
+def _assign(name: str):
+    """取模組層級某個賦值的 AST 節點（不執行 streamlit）。"""
     tree = ast.parse(APP.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        f = node.func
-        if not (isinstance(f, ast.Attribute) and f.attr == "radio"):
-            continue
-        for arg in node.args:
-            if isinstance(arg, ast.List) and all(
-                isinstance(e, ast.Constant) and isinstance(e.value, str) for e in arg.elts
-            ):
-                return [e.value for e in arg.elts]
-    raise AssertionError("找不到側欄的頁面清單")
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name) and t.id == name:
+                    return node.value
+    raise AssertionError(f"找不到 {name}")
+
+
+def _sidebar_pages() -> list[str]:
+    """側欄頁面清單。"""
+    node = _assign("PAGES")
+    assert isinstance(node, ast.List), "PAGES 應為字面清單，否則此契約無從檢查"
+    return [e.value for e in node.elts]
+
+
+def _slugs() -> dict[str, str]:
+    """頁面 → 網址代稱。"""
+    node = _assign("PAGE_SLUGS")
+    assert isinstance(node, ast.Dict)
+    return {k.value: v.value for k, v in zip(node.keys, node.values)}
 
 
 def _dispatched_pages() -> set[str]:
@@ -183,3 +191,20 @@ def test_stem_media_ids_exist_in_imagery_config():
     known = {i["id"] for i in imagery()} | {a["id"] for a in animations()}
     unknown = sorted(set(MEDIA) - known)
     assert not unknown, f"STEM 引用了不存在的媒體 id：{unknown}"
+
+
+def test_every_page_has_a_url_slug():
+    """每一頁都要能被直接連結。
+
+    深層連結的價值在教學場合最明顯——網址要能寫在投影片上。
+    """
+    slugs = _slugs()
+    assert set(slugs) == set(DOCUMENTED_PAGES), (
+        f"頁面與網址代稱不一致；缺代稱：{set(DOCUMENTED_PAGES) - set(slugs)}；"
+        f"多餘代稱：{set(slugs) - set(DOCUMENTED_PAGES)}"
+    )
+    assert len(set(slugs.values())) == len(slugs), "代稱重複"
+    for page, slug in slugs.items():
+        assert slug and slug.isascii() and slug.islower() and " " not in slug, (
+            f"{page} 的代稱 {slug!r} 不適合放在網址上"
+        )
