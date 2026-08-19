@@ -156,7 +156,8 @@ def test_stem_media_captions_are_multilingual():
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "apps" / "dashboard"))
     from stem import (
-        LANGS, LOAD_FAIL, MEDIA, MODEL_TAG, SOURCE_LABEL, VIDEO_SIZE,
+        LANGS, LOAD_FAIL, LOAD_FAIL_WHY, MEDIA, MODEL_TAG, OPEN_SITE,
+        SOURCE_LABEL, VIDEO_SIZE,
     )
 
     codes = set(LANGS.values())
@@ -171,6 +172,7 @@ def test_stem_media_captions_are_multilingual():
             assert not empty, f"{media_id}.{field} 在 {empty} 為空字串"
 
     for name, table in (("SOURCE_LABEL", SOURCE_LABEL), ("LOAD_FAIL", LOAD_FAIL),
+                        ("LOAD_FAIL_WHY", LOAD_FAIL_WHY), ("OPEN_SITE", OPEN_SITE),
                         ("VIDEO_SIZE", VIDEO_SIZE), ("MODEL_TAG", MODEL_TAG)):
         assert set(table) == codes, f"{name} 缺少語言：{sorted(codes - set(table))}"
 
