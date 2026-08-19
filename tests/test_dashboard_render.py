@@ -93,5 +93,17 @@ def test_stem_renders_every_referenced_still():
         f"引用 {len(expected)} 張靜態圖（{expected}），"
         f"實際只渲染出 {len(imgs)} 個影像元素——有影像取不到網址"
     )
-    warnings = [w.value for w in app.warning]
-    assert not warnings, f"STEM 頁出現載入警告：{warnings}"
+    # **模式標記本來就是 st.warning**（「這是算的不是拍的」必須醒目），
+    # 所以不能一律禁止警告，只能禁止「載入失敗」那一類。
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "apps" / "dashboard"))
+    from stem import LOAD_FAIL, LOAD_FAIL_WHY
+
+    bad_prefixes = tuple(
+        v.split("（")[0].split("(")[0].strip()
+        for v in list(LOAD_FAIL.values()) + list(LOAD_FAIL_WHY.values())
+    )
+    failures = [w.value for w in app.warning
+                if any(w.value.startswith(b) for b in bad_prefixes if b)]
+    assert not failures, f"STEM 頁出現載入失敗：{failures}"

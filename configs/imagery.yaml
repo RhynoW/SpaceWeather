@@ -179,17 +179,11 @@ images:
       url: https://www.swpc.noaa.gov/products/geospace-geomagnetic-activity-plot
       terms: 美國政府公眾領域資料
 
-# ── 動畫 ────────────────────────────────────────────────────────────────
-# 兩種作法，依單幀大小決定，不是依偏好決定：
-#
-#   video   產製者已預先編碼好的 MP4。適合高解析度序列——SUVI 304Å 單幀
-#           1.1 MB，359 幀等於 397 MB，用瀏覽器逐幀載入不切實際。
-#           編碼過的同一段內容只要 12 MB。
-#   frames  由 SWPC 的幀索引 JSON 即時組成。適合單幀 <100 KB 的序列，
-#           好處是永遠是最新的一段，且不需要任何伺服器端編碼。
-#           WSA-Enlil 沒有官方 MP4，只能走這條。
-#
-# 取樣：frames 型別會等距抽樣到 max_frames，避免一次載入整段。
+# ── 地球與參考視覺化 ────────────────────────────────────────────────
+# 這兩張不是太空天氣觀測，放進來各有明確用途：
+#   himawari_fulldisk  對照組——雲看得見、太空天氣看不見
+#   nasa_dialamoon     **繪算而非拍攝**，用來示範觀測與模式的差別
+# 後者的 group 為 model，展示層必須把它與觀測分開呈現。
 
   - id: himawari_fulldisk
     group: earth
@@ -211,6 +205,38 @@ images:
       provider: 情報通信研究機構（NICT）／氣象衛星向日葵九號（日本氣象廳）
       url: https://himawari8.nict.go.jp/
       terms: NICT 提供之公開即時影像；使用時請標註 NICT 與日本氣象廳（JMA）
+
+  - id: nasa_dialamoon
+    group: model
+    kind: json_api
+    title: 此刻的月相（模式繪算）
+    instrument: NASA SVS Dial-a-Moon（LRO 地形 + 天體力學）
+    # 這個 API 以「時刻」為參數，能回答任意時刻——因為它是算出來的。
+    api_url_template: https://svs.gsfc.nasa.gov/api/dialamoon/{Y}-{M}-{D}T{hh}:00
+    json_path: image.url
+    cadence_s: 3600
+    note: >
+      **這是繪算，不是拍攝。** 沒有任何太空船持續下傳月球的即時影像；
+      本圖以 LRO 的月面地形資料，配合該時刻的天體力學解算出視角與照明繪成，
+      連 API 回應的 alt text 都寫著「as it would appear」。
+      因此其 inference 必須標 modelled，不得與觀測並列呈現。
+      可取得的量還包括相位、月齡、視直徑、地月距離、天平動經緯與赤經赤緯。
+    attribution:
+      provider: NASA's Scientific Visualization Studio（月面地形取自 LRO/LOLA）
+      url: https://svs.gsfc.nasa.gov/5187/
+      terms: 美國政府公眾領域資料；使用時請標註 NASA's Scientific Visualization Studio
+
+# ── 動畫 ────────────────────────────────────────────────────────────────
+# 兩種作法，依單幀大小決定，不是依偏好決定：
+#
+#   video   產製者已預先編碼好的 MP4。適合高解析度序列——SUVI 304Å 單幀
+#           1.1 MB，359 幀等於 397 MB，用瀏覽器逐幀載入不切實際。
+#           編碼過的同一段內容只要 12 MB。
+#   frames  由 SWPC 的幀索引 JSON 即時組成。適合單幀 <100 KB 的序列，
+#           好處是永遠是最新的一段，且不需要任何伺服器端編碼。
+#           WSA-Enlil 沒有官方 MP4，只能走這條。
+#
+# 取樣：frames 型別會等距抽樣到 max_frames，避免一次載入整段。
 
 animations:
   - id: sdo_304_video
@@ -321,6 +347,11 @@ animations:
     note: >
       視野比 C2 更廣（約 30 倍太陽半徑），可**追蹤 CME 離開太陽後的傳播**，
       估算速度並推算抵達地球的時間。與 C2 併看：C2 看爆發瞬間，C3 看後續傳播。
+      **畫面背景那些緩慢移動的亮點是真正的恆星。** 遮住太陽本體之後，
+      C3 實際上是一台持續運作的天球監視器：看得到行星穿越視野、銀河帶通過，
+      也常拍到掠日彗星在接近太陽時解體。
+      **這是本專案唯一近乎連續、且為實拍的天球影像來源**——
+      月球那張是繪算，極光全天相機則因高緯度夏季永晝而整季停機。
     attribution:
       provider: ESA/NASA SOHO — LASCO 由 NRL 主持之國際團隊建造
       url: https://soho.nascom.nasa.gov/
