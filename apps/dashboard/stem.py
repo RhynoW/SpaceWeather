@@ -34,10 +34,10 @@ LANGS = {
 # ── 文案 ────────────────────────────────────────────────────────────────
 T: dict[str, dict[str, str]] = {
     "s6_head": {
-        "zh": "六、現在的地球長怎樣？",
-        "ja": "六、今の地球はどう見える？",
-        "en": "6. What does Earth look like right now?",
-        "ms": "6. Bagaimana rupa Bumi sekarang?",
+        "zh": "六、現在的地球與月亮長怎樣？",
+        "ja": "六、今の地球と月はどう見える？",
+        "en": "6. What do Earth and the Moon look like right now?",
+        "ms": "6. Bagaimana rupa Bumi dan Bulan sekarang?",
     },
     "s6_body": {
         "zh": """上面那些數字講的是**太空**天氣。同一時刻，氣象衛星看到的地球是這樣——
@@ -430,6 +430,38 @@ Taiwan mempunyai keadaan istimewa: **latitud geomagnet kita hanya sekitar 19°N*
 # 這裡另備一套教學用說明，四語齊備（有測試守住缺一即紅燈）。
 # 產製者名稱維持原文（專有名詞），只翻譯標籤與條款摘要。
 MEDIA: dict[str, dict[str, dict[str, str]]] = {
+    "nasa_dialamoon": {
+        "title": {
+            "zh": "此刻的月相",
+            "ja": "今の月の満ち欠け",
+            "en": "The Moon's phase right now",
+            "ms": "Fasa Bulan sekarang",
+        },
+        "note": {
+            "zh": "注意：**這張不是拍的，是算出來的。** 沒有任何太空船持續傳回月球的即時影像。"
+                  "NASA 拿月球探測軌道器測出的地形，配上此刻的天體力學，把視角與光照畫出來，"
+                  "連他們自己的說明都寫著「as it would appear（看起來會是這樣）」。"
+                  "上面那張地球是真的拍到的，這張不是——"
+                  "**能分辨這兩者，比記住任何一個數字都重要。**",
+            "ja": "注意：**これは撮影ではなく計算です。** 月をリアルタイムで撮り続けている探査機はありません。"
+                  "月周回衛星が測った地形に、その時刻の天体力学を合わせて視点と照明を描いたものです。"
+                  "NASA 自身の説明も「as it would appear（このように見えるはず）」と書いています。"
+                  "上の地球は本当に撮影されたもの、こちらは違います——"
+                  "**この二つを見分けられることのほうが、どんな数字を覚えるより大切です。**",
+            "en": "Note: **this is computed, not photographed.** No spacecraft streams live images "
+                  "of the Moon. NASA takes terrain measured by a lunar orbiter, adds the celestial "
+                  "mechanics for this hour, and renders the viewing angle and lighting — their own "
+                  "caption reads \"as it would appear\". The Earth above really was photographed; "
+                  "this was not — **being able to tell those apart matters more than memorising "
+                  "any number.**",
+            "ms": "Nota: **ini dikira, bukan difoto.** Tiada kapal angkasa yang menghantar imej "
+                  "Bulan secara langsung. NASA mengambil rupa bumi yang diukur oleh pengorbit "
+                  "Bulan, menambah mekanik cakerawala untuk jam ini, lalu melukis sudut dan "
+                  "pencahayaannya — kapsyen mereka sendiri menulis \"as it would appear\". "
+                  "Bumi di atas benar-benar difoto; ini tidak — **dapat membezakan kedua-duanya "
+                  "lebih penting daripada menghafal sebarang nombor.**",
+        },
+    },
     "sdo_euv_094": {
         "title": {
             "zh": "閃焰正在發生嗎？（極紫外 94Å）",
@@ -627,7 +659,7 @@ LOAD_FAIL_WHY = {
 
 
 def media_card(item: dict, lang: str, *, is_video: bool = False,
-               site_url: str | None = None) -> None:
+               site_url: str | None = None, is_model: bool = False) -> None:
     """STEM 用的影像／動畫卡：說明隨語言切換，來源仍與內容同框。
 
     產製者名稱與網址保持原文（專有名詞），只翻譯標籤與條款摘要——
@@ -639,6 +671,10 @@ def media_card(item: dict, lang: str, *, is_video: bool = False,
 
     st.markdown(f"**{title}**")
     st.caption(item.get("instrument", ""))
+    if is_model:
+        # 標在影像**上方**而非說明裡：讀者可能只看圖不看字，
+        # 而「這是算的不是拍的」正是最不能被略過的一句。
+        st.warning(f"⚙ {MODEL_TAG[lang]}")
 
     if is_video:
         mb = item.get("approx_mb")
@@ -861,6 +897,13 @@ def render(store, registry_fn, image_card, images_by_id,
     st.link_button(OPEN_SLIDER[lang], SLIDER_URL, width='stretch')
     st.caption(f"{SOURCE_LABEL[lang]}：RAMMB / CIRA, Colorado State University　"
                "[slider.cira.colostate.edu](https://slider.cira.colostate.edu/)")
+
+    # 月球緊接在地球之後，是刻意的：兩張看起來同樣「像照片」，
+    # 一張是真的拍到、一張是算出來的。這一頁最想教會的分辨能力就在這裡。
+    moon = images_by_id("nasa_dialamoon")
+    if moon:
+        st.divider()
+        media_card(moon[0], lang, is_model=True)
 
     st.divider()
 
