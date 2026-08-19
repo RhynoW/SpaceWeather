@@ -17,6 +17,7 @@
 | [docs/glossary.md](docs/glossary.md) | **名詞說明與參數判讀**（教育推廣、值勤判讀、常見誤讀） |
 | [docs/research_review.md](docs/research_review.md) | **依公開學術研究的強化檢視**（文獻對照、建議順序） |
 | [docs/cwa_swoo_analysis.md](docs/cwa_swoo_analysis.md) | 中央氣象署 SWOO 架構分析與介接記錄（授權依據、待確認事項） |
+| [docs/formosat7_tacc_analysis.md](docs/formosat7_tacc_analysis.md) | 福衛七號 TACC 資料分析（TDPC／TROPS）——**S4 閃爍資料源的確認** |
 
 > **關於本文長度**：本文刻意維持單一文件，不拆成「概覽／作業／技術」三份。
 > 理由是這套系統最容易被誤用的地方，正是**宣稱與限制之間的距離**——
