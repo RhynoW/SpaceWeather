@@ -3,16 +3,21 @@
 SGP4 的輸出在 **TEME**（真赤道平春分，當日），而精密定軌產品（SP3、leoOrb）
 在 **ITRF** 地固框架。兩者比對前必須先轉到同一框架，否則差異會被地球自轉角主導。
 
-## 為何不用 astropy
+## 與 astropy 的關係
 
-本機 `astropy 7.1.1` 與 `numpy 2.5.0` 不相容，`astropy.time` 與
-`astropy.coordinates` 皆無法 import（兩個獨立斷點：`np.in1d` 已移除，
-以及 astropy 直接引用 numpy 私有符號 `_check_interpolation_as_method`）。
-升級至 `astropy>=8.0` 可解，但那是共用直譯器，不宜由本專案逕行變更。
+本模組最初是因為本機 `astropy 7.1.1` 與 `numpy 2.5.0` 不相容而寫
+（`np.in1d` 已移除、astropy 又直接引用 numpy 私有符號
+`_check_interpolation_as_method`，`astropy.time` 與 `astropy.coordinates` 皆無法 import）。
+該環境問題已於 2026-08-19 由升級 `astropy 8.0.1` 解決。
 
-本模組與 **astropy 8.0.1 的 `ITRS→TEME` 實測差 0.183 m**（最大 0.195 m，
-取福衛七號 leoOrb 實際軌道驗證）——遠低於 leoOrb 自身的重疊一致性 0.25 m，
-對本專案的用途與 astropy 等價。
+保留本模組的理由改為：**不新增重量級相依**，且已對 astropy 完整驗證。
+以福衛七號 leoOrb 七天、五顆、2,636 個實際軌道點比對
+`astropy 8.0.1` 的 `ITRS→TEME`：
+
+    平均 0.081 m ／ 中位 0.058 m ／ P95 0.228 m ／ 最大 0.275 m
+
+遠低於 leoOrb 自身的弧段重疊一致性（0.25 m），對本專案用途與 astropy 等價。
+需要完整 IAU 2006/2000A 鏈或其他框架時，仍應直接用 astropy。
 
 ## 為何一定要帶 EOP
 
@@ -130,7 +135,7 @@ def ric(r_ref, v_ref, r_test) -> np.ndarray:
     """`r_test − r_ref` 在 RIC（徑向／沿跡／法向）的分量，km。
 
     **三個輸入必須在同一慣性框架**，且 `v_ref` 必須是慣性速度。
-    用地固速度會讓沿跡軸偏轉約 3.6°，把沿跡誤差洩漏到法向。
+    用地固速度會讓法向軸偏轉約 1.36°（實測，LEO 550 km），把沿跡誤差洩漏到法向。
     """
     r_ref = np.asarray(r_ref, dtype=float)
     v_ref = np.asarray(v_ref, dtype=float)
