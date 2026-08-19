@@ -33,6 +33,38 @@ LANGS = {
 
 # ── 文案 ────────────────────────────────────────────────────────────────
 T: dict[str, dict[str, str]] = {
+    "s6_head": {
+        "zh": "六、現在的地球長怎樣？",
+        "ja": "六、今の地球はどう見える？",
+        "en": "6. What does Earth look like right now?",
+        "ms": "6. Bagaimana rupa Bumi sekarang?",
+    },
+    "s6_body": {
+        "zh": """上面那些數字講的是**太空**天氣。同一時刻，氣象衛星看到的地球是這樣——
+雲、颱風、晝夜的交界線。
+
+把兩者擺在一起看，會發現一件事：**雲看得見，太空天氣看不見。**
+但看不見的那一種，會讓無線電中斷、讓衛星定位飄移。
+這就是為什麼除了氣象衛星，還需要另一整套觀測系統。""",
+        "ja": """上の数字は**宇宙**天気の話です。同じ時刻に気象衛星が見た地球はこう見えます——
+雲、台風、昼と夜の境目。
+
+並べてみると分かります：**雲は見えるが、宇宙天気は見えない。**
+それでも、見えないほうが無線を途切れさせ、衛星測位をずらします。
+だから気象衛星とは別に、もう一組の観測システムが必要なのです。""",
+        "en": """The numbers above are **space** weather. At the very same moment, this is Earth
+as a weather satellite sees it — clouds, typhoons, the day-night line.
+
+Put the two side by side and one thing stands out: **you can see clouds; you cannot
+see space weather.** Yet the invisible one is what cuts off radio and shifts satellite
+positioning. That is why a separate observing system exists alongside weather satellites.""",
+        "ms": """Nombor di atas ialah cuaca **angkasa**. Pada saat yang sama, inilah Bumi
+seperti dilihat oleh satelit cuaca — awan, taufan, garis siang-malam.
+
+Letakkan kedua-duanya bersebelahan dan satu perkara menonjol: **awan boleh dilihat;
+cuaca angkasa tidak.** Namun yang tidak kelihatan itulah yang memutuskan radio dan
+menyesatkan kedudukan satelit. Itulah sebabnya sistem pemerhatian berasingan wujud.""",
+    },
     "title": {
         "zh": "STEM：太空天氣入門",
         "ja": "STEM：宇宙天気入門",
@@ -40,10 +72,10 @@ T: dict[str, dict[str, str]] = {
         "ms": "STEM: Asas Cuaca Angkasa",
     },
     "subtitle": {
-        "zh": "給 12–18 歲。這一頁顯示的是**此刻**的太陽，不是課本插圖。",
-        "ja": "12〜18歳向け。このページに映るのは**今この瞬間**の太陽です。教科書の図ではありません。",
-        "en": "For ages 12–18. What you see here is the Sun **right now** — not a textbook diagram.",
-        "ms": "Untuk umur 12–18. Apa yang anda lihat di sini ialah Matahari **sekarang** — bukan gambar buku teks.",
+        "zh": "給 12–18 歲。這一頁顯示的是**此刻**的太陽與地球，不是課本插圖。",
+        "ja": "12〜18歳向け。このページに映るのは**今この瞬間**の太陽と地球です。教科書の図ではありません。",
+        "en": "For ages 12–18. What you see here is the Sun and Earth **right now** — not a textbook diagram.",
+        "ms": "Untuk umur 12–18. Apa yang anda lihat di sini ialah Matahari dan Bumi **sekarang** — bukan gambar buku teks.",
     },
     "s1_head": {
         "zh": "一、太陽不只是會發光",
@@ -313,10 +345,10 @@ Taiwan mempunyai keadaan istimewa: **latitud geomagnet kita hanya sekitar 19°N*
         "ms": "Tiada data buat masa ini. **Tiada data tidak sama dengan tiada masalah** — perbezaan penting dalam sains.",
     },
     "games_head": {
-        "zh": "六、小遊戲",
-        "ja": "六、ミニゲーム",
-        "en": "6. Mini-games",
-        "ms": "6. Permainan mini",
+        "zh": "七、小遊戲",
+        "ja": "七、ミニゲーム",
+        "en": "7. Mini-games",
+        "ms": "7. Permainan mini",
     },
     "g1_title": {
         "zh": "遊戲 1　誰先到？",
@@ -561,6 +593,23 @@ VIDEO_SIZE = {
 MODEL_TAG = {
     "zh": "模式輸出", "ja": "モデル計算", "en": "model output", "ms": "output model",
 }
+# CIRA SLIDER 的互動式全球面盤（向日葵、GeoColor、循環播放）。
+# 參數寫死是刻意的：預設落在全球面盤與 GeoColor，教學現場不必再設定。
+SLIDER_URL = (
+    "https://slider.cira.colostate.edu/?sat=himawari&sec=full_disk"
+    "&x=11013.333984375&y=11008&z=0&angle=0&im=12&ts=1&st=0&et=0"
+    "&speed=130&motion=loop&maps%5Bborders%5D=white"
+    "&p%5B0%5D=geocolor&opacity%5B0%5D=1&pause=0&slider=-1"
+    "&hide_controls=0&mouse_draw=0&follow_feature=0&follow_hide=0"
+    "&s=rammb-slider&draw_color=FFD700&draw_width=6"
+)
+
+OPEN_SLIDER = {
+    "zh": "開啟互動式全球面盤（可縮放、可播放動畫）",
+    "ja": "インタラクティブ全球画像を開く（拡大・アニメ再生）",
+    "en": "Open the interactive full disk (zoom and animate)",
+    "ms": "Buka cakera penuh interaktif (zum dan animasi)",
+}
 OPEN_SITE = {
     "zh": "開啟即時網頁（可縮放、可回看過去 24 小時）",
     "ja": "リアルタイムWebを開く（拡大・過去24時間の再生ができます）",
@@ -765,15 +814,6 @@ def render(store, registry_fn, image_card, images_by_id,
     st.header(t("s4_head", lang))
     st.markdown(t("s4_body", lang))
 
-    # 對照組：氣象衛星看得到雲，太空天氣沒有雲可看卻照樣造成影響。
-    # 這個對比是本頁最想留給學生的一件事，所以給它獨立小節與固定錨點——
-    # 錨點讓網址可以直接落在這一段（?page=stem#earth-weather），
-    # 教學現場才不必口頭指引「往下捲到第四節」。
-    items = images_by_id("himawari_fulldisk")
-    if items:
-        st.subheader(MEDIA["himawari_fulldisk"]["title"][lang], anchor="earth-weather")
-        media_card(items[0], lang, site_url="https://himawari8.nict.go.jp/")
-
     st.divider()
 
     # ── 五、即時資料 ──
@@ -804,7 +844,27 @@ def render(store, registry_fn, image_card, images_by_id,
 
     st.divider()
 
-    # ── 六、遊戲 ──
+    # ── 六、現在的地球長怎樣？──
+    # 緊接在「現在的太陽」之後，對比才成立：同一時刻、同樣從太空看，
+    # 一邊看得見雲，一邊什麼都看不見卻照樣造成影響。
+    # 錨點沿用 earth-weather，先前發出去的直達網址不會失效。
+    st.header(t("s6_head", lang), anchor="earth-weather")
+    st.markdown(t("s6_body", lang))
+
+    items = images_by_id("himawari_fulldisk")
+    if items:
+        media_card(items[0], lang, site_url="https://himawari8.nict.go.jp/")
+
+    # CIRA SLIDER 是互動式檢視器，可縮放、可播放動畫，比靜態圖適合課堂操作。
+    # **不能內嵌**——該站回應 X-Frame-Options: SAMEORIGIN，iframe 會被瀏覽器擋掉，
+    # 所以做成外開連結而不是假裝嵌得進來。
+    st.link_button(OPEN_SLIDER[lang], SLIDER_URL, width='stretch')
+    st.caption(f"{SOURCE_LABEL[lang]}：RAMMB / CIRA, Colorado State University　"
+               "[slider.cira.colostate.edu](https://slider.cira.colostate.edu/)")
+
+    st.divider()
+
+    # ── 七、遊戲 ──
     st.header(t("games_head", lang))
 
     # 遊戲 1
