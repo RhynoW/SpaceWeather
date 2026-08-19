@@ -661,6 +661,18 @@ https://spaceweather.streamlit.app/?page=stem&lang=en   English
 https://spaceweather.streamlit.app/?page=stem&lang=ms   Bahasa Melayu
 ```
 
+**段落錨點**：教學頁的「從太空看地球的天氣」一段另有固定錨點，
+網址可直接落在那一段，不必口頭指引「往下捲到第四節」：
+
+```
+https://spaceweather.streamlit.app/?page=stem#earth-weather
+https://spaceweather.streamlit.app/?page=stem&lang=en#earth-weather
+```
+
+該段並列了向日葵九號的全球面盤影像與 NICT 即時網頁的入口按鈕
+（<https://himawari8.nict.go.jp/>，可縮放、可回看過去 24 小時）。
+影像頁的「地球大氣（對照組）」分組亦可見：`?page=imagery`。
+
 代稱刻意用 ASCII 而非中文頁名——分享時不會變成一串百分號編碼，
 教學場合要把網址寫在投影片或白板上。中文頁名直接帶在網址上也接受，
 舊連結不會壞。代稱與頁面的對應由 `tests/test_dashboard_pages.py` 守住。

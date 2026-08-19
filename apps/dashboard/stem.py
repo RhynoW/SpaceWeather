@@ -561,9 +561,24 @@ VIDEO_SIZE = {
 MODEL_TAG = {
     "zh": "模式輸出", "ja": "モデル計算", "en": "model output", "ms": "output model",
 }
+OPEN_SITE = {
+    "zh": "開啟即時網頁（可縮放、可回看過去 24 小時）",
+    "ja": "リアルタイムWebを開く（拡大・過去24時間の再生ができます）",
+    "en": "Open the live website (zoomable, replays the last 24 hours)",
+    "ms": "Buka laman web langsung (boleh zum, main semula 24 jam lepas)",
+}
+# 失敗時要說**為什麼**。只寫「載入失敗」會讓人以為是對方站台的問題，
+# 而實際發生過的兩次都是本地邏輯漏改。
+LOAD_FAIL_WHY = {
+    "zh": "影像無法載入（{why}）",
+    "ja": "画像を読み込めません（{why}）",
+    "en": "Image could not load ({why})",
+    "ms": "Imej tidak dapat dimuatkan ({why})",
+}
 
 
-def media_card(item: dict, lang: str, *, is_video: bool = False) -> None:
+def media_card(item: dict, lang: str, *, is_video: bool = False,
+               site_url: str | None = None) -> None:
     """STEM 用的影像／動畫卡：說明隨語言切換，來源仍與內容同框。
 
     產製者名稱與網址保持原文（專有名詞），只翻譯標籤與條款摘要——
@@ -591,8 +606,13 @@ def media_card(item: dict, lang: str, *, is_video: bool = False) -> None:
             from media_url import image_url
 
             st.image(image_url(item), width='stretch')
-        except Exception:
-            st.warning(LOAD_FAIL[lang])
+        except Exception as exc:      # noqa: BLE001 — 單張影像失敗不應讓整頁掛掉
+            st.warning(LOAD_FAIL_WHY[lang].format(why=f"{type(exc).__name__}: {exc}"))
+
+    if site_url:
+        # 來源標註那行的網址字太小，教學現場點不到。有互動網頁可看時
+        # 給一個明顯的入口——這一項的重點本來就是「去看那個網站」。
+        st.link_button(OPEN_SITE[lang], site_url, width='stretch')
 
     if note:
         st.markdown(f"<div style='font-size:13px;line-height:1.6'>{note}</div>",
@@ -746,10 +766,13 @@ def render(store, registry_fn, image_card, images_by_id,
     st.markdown(t("s4_body", lang))
 
     # 對照組：氣象衛星看得到雲，太空天氣沒有雲可看卻照樣造成影響。
-    # 這個對比是本頁最想留給學生的一件事。
+    # 這個對比是本頁最想留給學生的一件事，所以給它獨立小節與固定錨點——
+    # 錨點讓網址可以直接落在這一段（?page=stem#earth-weather），
+    # 教學現場才不必口頭指引「往下捲到第四節」。
     items = images_by_id("himawari_fulldisk")
     if items:
-        media_card(items[0], lang)
+        st.subheader(MEDIA["himawari_fulldisk"]["title"][lang], anchor="earth-weather")
+        media_card(items[0], lang, site_url="https://himawari8.nict.go.jp/")
 
     st.divider()
 
