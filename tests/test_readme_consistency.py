@@ -33,14 +33,15 @@ def _only(pattern: str) -> int:
 
 
 def _sidebar_pages() -> list[str]:
+    """側欄頁面清單。取自模組層級的 PAGES 常數，而非 radio 的呼叫參數——
+    頁面清單與網址代稱需成對維護，故已抽成常數。"""
     tree = ast.parse((ROOT / "apps" / "dashboard" / "app.py").read_text(encoding="utf-8"))
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
-                and node.func.attr == "radio":
-            for arg in node.args:
-                if isinstance(arg, ast.List):
-                    return [e.value for e in arg.elts]
-    raise AssertionError("找不到側欄頁面清單")
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "PAGES" for t in node.targets
+        ):
+            return [e.value for e in node.value.elts]
+    raise AssertionError("找不到側欄頁面清單（PAGES）")
 
 
 def test_source_counts_match_config():

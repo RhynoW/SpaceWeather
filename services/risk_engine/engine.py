@@ -440,12 +440,23 @@ class RiskEngine:
             dom_status = status[status["domain"] == domain]
             has_data = (dom_status["status"] == "ok").any()
             level = max_level([e.level for e in dom_eps]) if dom_eps else ("L0" if has_data else "—")
+
+            # **判據涵蓋率必須一併回報。** has_data 只要任一規則可評估就為真，
+            # 於是「代理查過了、實測沒查」會顯示成與「全部查過」相同的綠燈——
+            # 綠燈代表已確認無異常，這個等號正是本系統最不該犯的錯。
+            # 軌道預報網域尤其會常態落在此狀態：Kp 判據隨時可評估，
+            # 而實測密度判據所依賴的精密定軌是手動來源。
+            unevaluated = sorted(dom_status.loc[dom_status["status"] != "ok", "rule_id"])
             rows.append(
                 {
                     "domain": domain,
                     "level": level,
                     "data_available": bool(has_data),
                     "active_rules": ",".join(sorted({e.rule_id for e in dom_eps})) or "—",
+                    "criteria_total": int(len(dom_status)),
+                    "criteria_ok": int(len(dom_status) - len(unevaluated)),
+                    "fully_evaluated": bool(not unevaluated),
+                    "unevaluated_rules": ",".join(unevaluated),
                     # 網域層級的依據：無資料 → unavailable；全部推估 → proxy；
                     # 其餘取最弱的一項（proxy > modelled > observed），不回 null。
                     "inference": _domain_inference(dom_eps, has_data),

@@ -69,6 +69,22 @@ def load_health() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=300)
+def coverage_note(row) -> tuple[str, str]:
+    """回傳 (簡短標示, 說明)。判據未全部評估時必須說出來。
+
+    燈號是綠色只代表「已評估的判據都未達門檻」。若該網域還有判據因缺資料
+    而未評估，綠燈就不等於「已確認無異常」——把這兩者混為一談，
+    正是本系統在參數層級極力避免、卻可能在網域層級重犯的錯。
+    """
+    total = int(row.get("criteria_total", 0) or 0)
+    ok = int(row.get("criteria_ok", 0) or 0)
+    if not total or ok >= total:
+        return "", ""
+    missing = str(row.get("unevaluated_rules", "") or "")
+    return (f"判據 {ok}/{total}",
+            f"未評估：{missing}（缺資料，非未達門檻）")
+
+
 def load_nowcast() -> pd.DataFrame:
     return RiskEngine(get_store()).nowcast()
 
@@ -534,12 +550,32 @@ if _ORIGIN["is_demo"]:
 
 st.sidebar.title("🛰 SWX-SDA")
 st.sidebar.caption("太空天氣整合資訊與 SDA 應用系統")
-page = st.sidebar.radio(
-    "頁面",
-    ["值勤模式", "太空環境總覽", "太陽與行星際影像", "參數時序", "事件卡",
-     "太陽閃焰", "48 小時預報", "地磁基準場", "軌道與密度修正",
-     "資料健康", "門檻校準", "名詞與判讀", "使用指南", "STEM 教學"],
-)
+PAGES = ["值勤模式", "太空環境總覽", "太陽與行星際影像", "參數時序", "事件卡",
+         "太陽閃焰", "48 小時預報", "地磁基準場", "軌道與密度修正",
+         "資料健康", "門檻校準", "名詞與判讀", "使用指南", "STEM 教學"]
+
+# 網址代稱：讓每一頁都能被直接連結。用 ASCII 而非中文頁名，
+# 分享時不會變成一串百分號編碼——教學場合要把網址寫在投影片或白板上。
+PAGE_SLUGS = {
+    "值勤模式": "duty", "太空環境總覽": "overview", "太陽與行星際影像": "imagery",
+    "參數時序": "series", "事件卡": "events", "太陽閃焰": "flares",
+    "48 小時預報": "forecast", "地磁基準場": "geomag", "軌道與密度修正": "density",
+    "資料健康": "health", "門檻校準": "thresholds", "名詞與判讀": "glossary",
+    "使用指南": "guide", "STEM 教學": "stem",
+}
+SLUG_TO_PAGE = {v: k for k, v in PAGE_SLUGS.items()}
+
+_want = str(st.query_params.get("page", "")).strip().lower()
+# 中文頁名直接帶在網址上也接受——舊連結與手動輸入都不該壞掉
+_default = SLUG_TO_PAGE.get(_want) or (
+    st.query_params.get("page") if st.query_params.get("page") in PAGES else None
+) or PAGES[0]
+
+page = st.sidebar.radio("頁面", PAGES, index=PAGES.index(_default))
+
+# 只在不一致時寫回，否則會與 Streamlit 的 rerun 形成迴圈
+if PAGE_SLUGS[page] != _want:
+    st.query_params["page"] = PAGE_SLUGS[page]
 lookback = st.sidebar.slider("回顧天數", 1, 60, 7)
 st.sidebar.divider()
 autostart_refresh()
@@ -594,13 +630,21 @@ if page == "值勤模式":
                 )
             else:
                 color = LEVEL_COLOR.get(lvl, "#888")
+                cov, cov_why = coverage_note(row)
+                cov_html = (
+                    f"<br><span style='color:#e8a33d;font-size:.8em'>&#9679; {cov}</span>"
+                    if cov else ""
+                )
                 st.markdown(
                     f"<div style='padding:14px;border-radius:8px;background:#2b2b2b;"
                     f"border-left:6px solid {color}'><b>{row['domain']}</b><br>"
                     f"<span style='font-size:2em;color:{color}'>{lvl}</span>"
-                    f"<br><small>{row.get('active_rules', '—')} {INFER_NOTE.get(infer, '')}</small></div>",
+                    f"<br><small>{row.get('active_rules', '—')} {INFER_NOTE.get(infer, '')}</small>"
+                    f"{cov_html}</div>",
                     unsafe_allow_html=True,
                 )
+                if cov_why:
+                    st.caption(cov_why)
 
     st.divider()
     left, right = st.columns([3, 2])
@@ -718,6 +762,9 @@ elif page == "太空環境總覽":
         level = row["level"]
         color = LEVEL_COLOR.get(level, "#616161")
         note = "（間接推估）" if row.get("inference") == "proxy" else ""
+        cov, cov_why = coverage_note(row)
+        cov_html = (f"""<div style="font-size:.75rem;color:#e8a33d">&#9679; {cov}</div>"""
+                    if cov else "")
         col.markdown(
             f"""<div style="border-left:6px solid {color};padding:.6rem 1rem;
                  background:rgba(128,128,128,.08);border-radius:4px">
@@ -726,9 +773,12 @@ elif page == "太空環境總覽":
                  <div style="font-size:1.7rem;font-weight:700;color:{color}">
                    {level} {LEVEL_NAME.get(level, '')}</div>
                  <div style="font-size:.75rem;opacity:.65">{note or row['active_rules']}</div>
+                 {cov_html}
                </div>""",
             unsafe_allow_html=True,
         )
+        if cov_why:
+            col.caption(cov_why)
 
     st.divider()
     c1, c2 = st.columns([2, 1])
@@ -1131,8 +1181,51 @@ elif page == "軌道與密度修正":
         st.info(
             "基準為**同一 F10.7、地磁寧靜（Ap=4）**，而非太陽極小期——"
             "後者會把太陽週期當成事件效應，在太陽極大期產生十倍以上的假修正。"
-            "不確定度為經驗保守值，尚未由觀測反演校準。"
+            "不確定度為經驗保守值。"
         )
+
+        # ── 觀測側：福衛七號精密定軌反演的密度增強倍數 ──
+        # 上圖是**模型**輸出。有觀測時必須並陳，否則讀者無從判斷模型錯多少。
+        obs = get_store().query("DRAG_ENHANCEMENT", start=start, end=end)
+        st.subheader("與觀測比較")
+        if obs.empty:
+            st.warning(
+                "此期間無 `DRAG_ENHANCEMENT` 觀測，上圖**純為模型輸出**。"
+                "取得方式：`python -m services.ingest.run --source tacc_leoorb "
+                "--date YYYY.DDD`（福衛七號精密定軌，手動或排程來源）。"
+            )
+        else:
+            bands = set(dc["alt_band_km"])
+            pick = "500-600" if "500-600" in bands else dc["alt_band_km"].iloc[0]
+            band = dc[dc["alt_band_km"] == pick]
+            merged = pd.merge_asof(
+                obs[["valid_time", "value"]].sort_values("valid_time").rename(
+                    columns={"value": "觀測"}),
+                band[["valid_time", "storm_ratio"]].sort_values("valid_time").rename(
+                    columns={"storm_ratio": "模型"}),
+                on="valid_time", direction="nearest",
+                tolerance=pd.Timedelta("3h"),
+            ).dropna()
+            if merged.empty:
+                st.info("觀測與模型的時刻無法對齊（容差 3 小時）。")
+            else:
+                merged["觀測／模型"] = merged["觀測"] / merged["模型"]
+                k1, k2, k3 = st.columns(3)
+                k1.metric("觀測峰值", f"{merged['觀測'].max():.2f}×")
+                k2.metric("模型峰值", f"{merged['模型'].max():.2f}×")
+                k3.metric("最大 觀測／模型", f"{merged['觀測／模型'].max():.2f}")
+                fig2 = px.line(merged, x="valid_time", y=["觀測", "模型"])
+                fig2.update_layout(height=300, margin=dict(l=0, r=0, t=10, b=0),
+                                   yaxis_title="密度倍率", legend_title="")
+                st.plotly_chart(fig2, width='stretch')
+                st.caption(
+                    "觀測側由福衛七號精密定軌的軌道平均衰減率反演，"
+                    "**彈道係數在比值中消掉**，故不需衛星的投影面積、阻力係數與乾重"
+                    "（三者皆未公開）。實測 2024-05 Gannon：比值隨增強倍數單調上升"
+                    "（觀測 <1.5 時 0.85、≥3.5 時 1.70），即**模型的暴時響應被壓縮**。"
+                    "兩條基線間可能有常數偏移，故**只有此單調趨勢可引用**，"
+                    "個別絕對值不可。`calibrated_by_observation` 仍為 `false`。"
+                )
         st.dataframe(dc.tail(30), hide_index=True, width='stretch')
 
     st.divider()
