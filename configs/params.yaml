@@ -488,6 +488,16 @@ params:
     cadence_s: 3600
     impacts: [ORBIT_PREDICTION]
     status: ready
+  - code: DRAG_DECAY
+    name_zh: 軌道平均阻力衰減率
+    name_en: Orbit-averaged drag decay rate
+    unit: m/day
+    domain: thermo
+    valid_min: 0.0
+    valid_max: 2000.0
+    cadence_s: 21600
+    impacts: [ORBIT_PREDICTION]
+    status: ready
   - code: RHO_RATIO
     name_zh: 觀測／模型密度比值
     name_en: Observed-to-model density ratio

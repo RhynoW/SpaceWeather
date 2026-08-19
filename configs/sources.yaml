@@ -313,6 +313,37 @@ sources:
       故暫不讓其驅動分級規則，見 docs/cwa_swoo_analysis.md。
       同一端點另含 kidx/DST/sws/XrayFx 等全球量，本案已有權威來源，刻意不取。
 
+  - source_id: tacc_leoorb
+    name: 福衛七號精密定軌反演之阻力衰減率（TACC leoOrb）
+    connector: tacc_leoorb
+    tier: 1
+    attribution:
+      provider: 'TACC（Taiwan Analysis Center for COSMIC，交通部中央氣象署）／UCAR CDAAC'
+      product: '福衛七號 leoOrb 精密定軌（SP3-c，60 秒節奏，IGS08 地固框架，GPS 時）。本案由密切半長軸的長期衰減反演軌道平均阻力，跨衛星取中位數，6 小時分箱'
+      url: 'https://tacc.cwa.gov.tw/v2/download.html'
+      terms: 'Release Memorandum（F7C2_SpWx_DataRelease_5.pdf）為技術性釋出說明，未見註冊要求或再散布限制；正式取用條款由合作夥伴（成功大學團隊）於兩年期計畫內確認。引用時須標註 TACC 與 UCAR CDAAC'
+    status: ready
+    provides: [DRAG_DECAY]
+    cadence_s: 21600
+    latency_budget_s: 259200
+    publication_lag_s: 86400
+    endpoint: https://tacc.cwa.gov.tw/data-service/fs7rt_tdpc/daily_tar/{date}/leoOrb_{date}.tar.gz
+    format: tacc_leoorb_tar
+    tls_relaxed_strict: true
+    # 衰減率需要連續多日才算得出來；首尾各因移動平均損失半個窗
+    span_days: 4
+    notes: >
+      **ORBIT_PREDICTION 網域第一個實測判據**——在此之前該網域四條規則全部
+      以 Kp/Ap 為門檻，那是地磁代理而非熱氣層密度本身。
+      交付的是衰減率而非密度：彈道係數 B = Cd*A/m 所需的投影面積、阻力係數
+      與乾重**皆未公開**，故無法解出絕對密度；但**取比值時 B 完全消掉**，
+      密度增強倍數因此可由本序列相除直接得到，不需任何非公開的衛星參數。
+      實測 2024-05 Gannon 事件：暴前基線約 60 m/日，2024-05-11 06:00 UT
+      峰值達 270 m/日，**密度增強 4.67 倍**，而 MSIS 2.1 沿同一軌跡僅給 2.28 倍
+      ——**模型低估約一倍**。平靜期觀測與模型吻合在 ±10% 內。
+      單日打包檔約 1.4–2.2 MB，一次抓 4 天，**排除於背景自動更新之外**。
+      詳見 docs/formosat7_tacc_analysis.md。
+
   - source_id: tacc_scn1c2
     name: 福衛七號掩星閃爍指數（TACC scn1c2）
     connector: tacc_scint
