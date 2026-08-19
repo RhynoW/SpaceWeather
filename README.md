@@ -138,8 +138,8 @@ pip install -r requirements.lock   # 重現本文數字時使用
 
 | 層 | 模組 | 狀態 |
 |---|---|---|
-| 擷取層 | `services/ingest` | ✅ 21 個來源（18 個可運作）：CelesTrak、GFZ ×2、SWPC ×9、Kyoto、NASA OMNI2、**中央氣象署 SWOO**、**福衛七號 TACC**。其中 15 個納入背景自動更新 |
-| 資料層 | `packages/swx_core` | ✅ 雙時間軸 Parquet + DuckDB、品質三級制、44 個註冊參數 |
+| 擷取層 | `services/ingest` | ✅ 22 個來源（19 個可運作）：CelesTrak、GFZ ×2、SWPC ×9、Kyoto、NASA OMNI2、**中央氣象署 SWOO**、**福衛七號 TACC ×2**（閃爍 `scn1c2`、精密定軌 `leoOrb`）。其中 15 個納入背景自動更新 |
+| 資料層 | `packages/swx_core` | ✅ 雙時間軸 Parquet + DuckDB、品質三級制、45 個註冊參數 |
 | 模型層 | `packages/orbit_drag`、`packages/geomag` | ✅ 熱氣層密度／阻力（MSIS 2.1，暴時 ap 模式）＋地磁基準場（IGRF-14）；電離層 D 層吸收已接 |
 | 預報層 | `services/forecast` | ⚠️ **功能覆蓋** 1–48 h Kp 預報＋驗證擂台。**任何 horizon 皆非正式作業產品**；1–12 h 可作研究參考，**>12 h 為非作業性研究預報**（與 API 的 `not_for_operational_use_beyond_h: 12` 一致） |
 | 風險層 | `services/risk_engine` | ✅ 3 網域 15 條規則、事件卡、作業狀態庫 |
