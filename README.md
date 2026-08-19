@@ -7,6 +7,14 @@
 
 **定位**：不重建國家級預報中心，而是建立「任務化轉譯層」。
 
+**線上版**：<https://spaceweather.streamlit.app/>
+　　教學頁可直達：[繁中](https://spaceweather.streamlit.app/?page=stem&lang=zh)　
+[日本語](https://spaceweather.streamlit.app/?page=stem&lang=ja)　
+[English](https://spaceweather.streamlit.app/?page=stem&lang=en)　
+[Bahasa Melayu](https://spaceweather.streamlit.app/?page=stem&lang=ms)
+
+> 線上版使用示範快照，**不是即時作業資料**（app 內有紅色橫幅標示）。
+
 | 文件 | 內容 |
 |---|---|
 | [docs/architecture.md](docs/architecture.md) | 系統架構、設計原則、與構想書七大議題的對應 |
@@ -613,7 +621,8 @@ python tools/make_source_list.py     # → docs/SpaceWeather資料來源清單YY
 
 ## 儀表板
 
-`streamlit run apps/dashboard/app.py`。頁面清單以側欄實際顯示為準
+線上版：<https://spaceweather.streamlit.app/>　本機：`streamlit run apps/dashboard/app.py`。
+頁面清單以側欄實際顯示為準
 （由 `tests/test_dashboard_pages.py` 守住與本表一致）：
 
 | 頁面 | 網址代稱 | 用途 |
@@ -638,18 +647,18 @@ python tools/make_source_list.py     # → docs/SpaceWeather資料來源清單YY
 每一頁都可以用網址直接開啟，不必開進去再點側欄：
 
 ```
-<app 網址>/?page=stem            STEM 教學頁
-<app 網址>/?page=duty            值勤模式
-<app 網址>/?page=density         軌道與密度修正
+https://spaceweather.streamlit.app/?page=stem           STEM 教學頁
+https://spaceweather.streamlit.app/?page=duty           值勤模式
+https://spaceweather.streamlit.app/?page=density        軌道與密度修正
 ```
 
 **STEM 教學頁另吃 `lang` 參數**，四種語言可各自直達：
 
 ```
-?page=stem&lang=zh     繁體中文（預設）
-?page=stem&lang=ja     日本語
-?page=stem&lang=en     English
-?page=stem&lang=ms     Bahasa Melayu
+https://spaceweather.streamlit.app/?page=stem&lang=zh   繁體中文（預設）
+https://spaceweather.streamlit.app/?page=stem&lang=ja   日本語
+https://spaceweather.streamlit.app/?page=stem&lang=en   English
+https://spaceweather.streamlit.app/?page=stem&lang=ms   Bahasa Melayu
 ```
 
 代稱刻意用 ASCII 而非中文頁名——分享時不會變成一串百分號編碼，
@@ -876,6 +885,7 @@ python -m services.ingest.refresh --force --full    # 強制，含重量級來�
 | Repository | `RhynoW/SpaceWeather` |
 | Branch | `main` |
 | Main file path | `apps/dashboard/app.py` |
+| 部署網址 | <https://spaceweather.streamlit.app/> |
 
 **不需要設定任何 secrets 或環境變數。**
 雲端是全新 clone、`data/` 沒有觀測分區，此時 `swx_core.config.data_dir()`
