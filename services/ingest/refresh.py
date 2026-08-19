@@ -32,11 +32,12 @@ from swx_core.schema import OBSERVED_TYPES
 # 自動更新一律排除的來源。
 #   omni2_hourly  六年份歷史回填（數十秒～分鐘級），且本身是事後重整資料，無即時價值
 #   gfz_hp30      120 天完整序列檔，**單一來源就要 46 秒**，佔全部擷取時間的六成
-# 兩者都改由手動「完整更新」或排程主機處理，不放進頁面載入路徑。
-EXCLUDE_FROM_REFRESH = frozenset({"omni2_hourly", "gfz_hp30"})
+#   tacc_scn1c2   單日打包檔 **約 72 MB**，且需解壓近萬個 netCDF 再逐一解析
+# 三者都改由手動「完整更新」或排程主機處理，不放進頁面載入路徑。
+EXCLUDE_FROM_REFRESH = frozenset({"omni2_hourly", "gfz_hp30", "tacc_scn1c2"})
 
-# 手動完整更新才納入的重量級來源（實測：hp30 約 46s）
-HEAVY_SOURCES = frozenset({"gfz_hp30"})
+# 手動完整更新才納入的重量級來源（實測：hp30 約 46s、tacc_scn1c2 約 72 MB）
+HEAVY_SOURCES = frozenset({"gfz_hp30", "tacc_scn1c2"})
 
 DEFAULT_MAX_AGE_S = 3600.0     # 60 分鐘
 

@@ -138,7 +138,7 @@ pip install -r requirements.lock   # 重現本文數字時使用
 
 | 層 | 模組 | 狀態 |
 |---|---|---|
-| 擷取層 | `services/ingest` | ✅ 20 個來源（17 個可運作）：CelesTrak、GFZ ×2、SWPC ×9、Kyoto、NASA OMNI2、**中央氣象署 SWOO**。其中 15 個納入背景自動更新 |
+| 擷取層 | `services/ingest` | ✅ 21 個來源（18 個可運作）：CelesTrak、GFZ ×2、SWPC ×9、Kyoto、NASA OMNI2、**中央氣象署 SWOO**、**福衛七號 TACC**。其中 15 個納入背景自動更新 |
 | 資料層 | `packages/swx_core` | ✅ 雙時間軸 Parquet + DuckDB、品質三級制、44 個註冊參數 |
 | 模型層 | `packages/orbit_drag`、`packages/geomag` | ✅ 熱氣層密度／阻力（MSIS 2.1，暴時 ap 模式）＋地磁基準場（IGRF-14）；電離層 D 層吸收已接 |
 | 預報層 | `services/forecast` | ⚠️ **功能覆蓋** 1–48 h Kp 預報＋驗證擂台。**任何 horizon 皆非正式作業產品**；1–12 h 可作研究參考，**>12 h 為非作業性研究預報**（與 API 的 `not_for_operational_use_beyond_h: 12` 一致） |
@@ -490,8 +490,9 @@ IGRF-14 基準場離線可算，不需外部資料（臺灣代表點 F≈45,007 
   `is_proxy` 旗標都會傳遞到 API 與儀表板。
 - **不保證 STK/HPOP 與本系統的密度結果一致**：CSSI 驅動檔的格式已驗證，
   但 STK 端的實際載入與傳播結果尚未做交叉比對。
-- **不對 GNSS 閃爍風險提供實測判定**：S4/ROTI/TEC 尚無資料源，
-  相關規則回報 `unavailable` 而非 L0。
+- **GNSS 閃爍的實測判定仍不完整**：S4 已由福衛七號掩星（`tacc_scn1c2`）提供，
+  但 ROTI 仍無來源，故 `GNSS-L3-SCINT` 回報 `partial`——**該規則可發報，
+  但「沒有告警」不等於確認平靜**。且掩星幾何與地面測站不同，門檻尚未校準。
 - **任何 horizon 的預報皆非正式作業產品；超過 12 小時者不得用於作業決策**：
   訓練折 POD 約 0.83、測試折僅 0.38–0.02，過擬合落差在**所有 horizon** 上都存在，
   因此 1–12 h 亦僅供研究參考；24h 起 BSS 轉負、48h 未通過基線門檻。
@@ -568,6 +569,7 @@ python tools/make_source_list.py     # → docs/SpaceWeather資料來源清單YY
 | Kyoto WDC Dst | 逐時 Dst | ✅ |
 | **NASA OMNI2** | 逐時**經時間位移校正與跨衛星合併**的 IMF 與太陽風資料（非單一儀器原始觀測）；Kp／Dst／ap／F10.7 為 OMNI 併入同一時間軸的地磁與太陽活動指數，原始產製者為 GFZ／WDC Kyoto／加拿大 DRAO。1963 起 | ✅ 預報引擎的訓練資料來源。各參數的原始來源與處理方式見 `configs/sources.yaml` |
 | **中央氣象署 SWOO** | CWA 以在地觀測產製的區域太空天氣產品：TWTEC（地面 GNSS 網**反演**之總電子含量）、TWDI（磁力計 ΔH 各站**中位數**） | ✅ 經授權介接。**非公開 API，第三方須另行取得授權** |
+| **福衛七號 TACC** | 掩星 S4 振幅閃爍指數（`scn1c2`），取臺灣周邊並 15 分鐘分箱 | ✅ **GNSS_PNT 網域首個實測判據**。單日打包 54 MB，不納入自動更新 |
 | 地基 GNSS TEC/ROTI/S4（在地） | 電離層閃爍實測 | ⛔ 需外部協調 |
 | 區域磁力計即時串流 | 區域地磁 | ⛔ 需外部協調 |
 | 電離層探測儀 | foF2 | ⛔ 需外部協調 |
@@ -679,8 +681,19 @@ python tools/cssi_compare.py --level field   # 診斷差異落在哪一欄
 就再也不會被標記為劣化**。此為實際發生過的缺陷，已由
 `tests/test_api_contract.py::test_data_age_excludes_forecast_rows` 守住。
 
-`/v1/rules` 的 `status: unavailable` 代表**該規則所需資料不存在**，
-不代表風險為零。這兩者是「沒資料」與「沒事」的區分機制。
+`/v1/rules` 的 `status` 有三種，意義不同：
+
+| 狀態 | 意義 | 「沒有告警」代表什麼 |
+|---|---|---|
+| `ok` | 所有宣告的判據都有資料 | **已確認未達門檻** |
+| `partial` | 部分判據有資料，仍會評估並可能發報 | **不等於確認平靜**——缺少的判據可能單獨觸發 |
+| `unavailable` | 一個判據都沒有 | **完全無法判定**，不代表風險為零 |
+
+實例：`GNSS-L3-SCINT` 宣告 `requires_params: [S4, ROTI]`。福衛七號掩星接上後
+S4 有了、ROTI 仍無來源，故為 `partial`——規則會在 S4 超標時發報，
+但缺 ROTI 的情況下不可把「無告警」讀成安全。
+
+這三者是「沒事」／「部分可判」／「沒資料」的區分機制。
 
 回應含本系統預報（`source_id: swx_forecast`）時，另帶 `advisory`：
 

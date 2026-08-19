@@ -23,6 +23,7 @@ from swx_core import SourceSpec, SwxStore, catalog
 from .base import Connector, FetchOutcome
 from .celestrak_sw import CelestrakCsvConnector, CelestrakSpaceWeatherConnector
 from .cwa_swoo import CwaSwooConnector
+from .tacc_scint import TaccScintConnector
 from .gfz_nowcast import GfzNowcastConnector
 from .swpc_json import SwpcJsonConnector
 from .swpc_solar import SwpcFlareConnector, SwpcSolarRegionsConnector
@@ -36,6 +37,7 @@ from .forecast_sources import (
 )
 
 CONNECTORS: tuple[type[Connector], ...] = (
+    TaccScintConnector,
     CwaSwooConnector,
     CelestrakSpaceWeatherConnector,
     CelestrakCsvConnector,

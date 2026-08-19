@@ -192,3 +192,68 @@ def test_event_card_revision_only_on_change(tmp_path, store):
     history = es.history(card.event_id)
     assert len(history) == 2
     assert history[-1]["supersedes"].endswith("@r1")
+
+
+# ── 部分可用（partial）────────────────────────────────────────────────
+def test_partial_status_still_evaluates_available_criteria():
+    """部分判據有資料時仍須評估，不可整條規則噤聲。
+
+    實際情境：GNSS-L3-SCINT 宣告 requires_params = [S4, ROTI]。
+    福衛七號掩星接上後 S4 有了、ROTI 仍無來源。舊行為是整條規則回
+    `unavailable`——於是實測到 S4=1.17（遠超 0.6 門檻）卻不發報，
+    **明明偵測得到卻不說**，比沒有資料更糟。
+
+    但也不能回 `ok`：本規則為 any/OR，缺少的 ROTI 可能單獨觸發，
+    所以此狀態下「沒有告警」**不等於確認平靜**。故第三種狀態 `partial`。
+    """
+    from datetime import datetime, timedelta, timezone
+
+    import pandas as pd
+
+    from services.risk_engine.engine import RiskEngine, load_rules
+
+    rules = [r for r in load_rules() if r.rule_id == "GNSS-L3-SCINT"]
+    assert rules, "找不到 GNSS-L3-SCINT 規則"
+    rule = rules[0]
+    assert set(rule.requires_params) == {"S4", "ROTI"}
+
+    import tempfile
+
+    store = SwxStore(tempfile.mkdtemp())
+    t0 = datetime(2026, 8, 17, tzinfo=timezone.utc)
+    times = pd.date_range(t0, periods=8, freq="15min", tz="UTC")
+    store.write(
+        normalize(pd.DataFrame({
+            "valid_time": times,
+            "param_code": "S4",
+            "value": [0.1, 0.2, 0.9, 1.1, 1.0, 0.9, 0.2, 0.1],
+            "unit": "1",
+            "source_id": "tacc_scn1c2",
+            "data_type": "OBS",
+        })),
+        source_id="tacc_scn1c2",
+    )
+
+    episodes, status = RiskEngine(store, rules=[rule]).evaluate(
+        start=t0 - timedelta(hours=1), end=t0 + timedelta(hours=4))
+
+    row = status[status["rule_id"] == "GNSS-L3-SCINT"].iloc[0]
+    assert row["status"] == "partial", f"應為 partial，實得 {row['status']}"
+    assert episodes, "S4 已超過門檻卻未產生事件段"
+    assert all(e.level == "L3" for e in episodes)
+
+
+def test_unavailable_only_when_no_criterion_has_data():
+    """一個判據都沒有時才是 unavailable。"""
+    import tempfile
+    from datetime import datetime, timedelta, timezone
+
+    from services.risk_engine.engine import RiskEngine, load_rules
+
+    rule = next(r for r in load_rules() if r.rule_id == "GNSS-L3-SCINT")
+    store = SwxStore(tempfile.mkdtemp())
+    t0 = datetime(2026, 8, 17, tzinfo=timezone.utc)
+
+    _, status = RiskEngine(store, rules=[rule]).evaluate(
+        start=t0, end=t0 + timedelta(hours=4))
+    assert status[status["rule_id"] == "GNSS-L3-SCINT"].iloc[0]["status"] == "unavailable"

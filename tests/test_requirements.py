@@ -32,7 +32,8 @@ STDLIB = {
     "dataclasses", "datetime", "enum", "functools", "glob", "hashlib", "importlib",
     "io", "itertools", "json", "logging", "math", "operator", "os", "pathlib",
     "random", "re", "shutil", "socket", "sqlite3", "ssl", "struct", "subprocess",
-    "sys", "tempfile", "textwrap", "threading", "time", "typing", "urllib", "uuid",
+    "sys", "tarfile", "tempfile", "textwrap", "threading", "time", "typing",
+    "urllib", "uuid",
     "warnings", "zoneinfo",
 }
 

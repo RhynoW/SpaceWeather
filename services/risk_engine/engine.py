@@ -249,16 +249,35 @@ class RiskEngine:
         end: datetime | None = None,
         as_of: datetime | None = None,
     ) -> tuple[list[Episode], str]:
-        """回傳 (episodes, status)。status ∈ ok / unavailable。"""
+        """回傳 (episodes, status)。status ∈ ok / partial / unavailable。
+
+        三種狀態的意義不同，呼叫端必須分辨：
+          ok           所有宣告的判據都有資料，「沒有告警」＝已確認未達門檻
+          partial      部分判據有資料。仍會評估並可能發報，但**「沒有告警」
+                       不等於確認平靜**——缺少的判據可能單獨觸發
+          unavailable  一個判據都沒有，完全無法判定。**不代表風險為零**
+        """
         series: dict[str, pd.Series] = {}
         for p in rule.params:
             series[p] = self._series(p, start, end, as_of)
 
         needed = rule.requires_params or tuple(rule.params)
-        if all(series.get(p, pd.Series(dtype=float)).empty for p in needed):
+        missing = [p for p in needed
+                   if series.get(p, pd.Series(dtype=float)).empty]
+
+        if len(missing) == len(needed):
+            # 一個判據都沒有 → 完全無法判定
             return [], "unavailable"
-        if any(series.get(p, pd.Series(dtype=float)).empty for p in rule.requires_params):
-            return [], "unavailable"
+
+        status = "ok"
+        if missing:
+            # 部分判據有資料。**仍然評估**——手上已有的判據若超標就該發報，
+            # 因為缺了另一個判據而整條規則噤聲，等於明明偵測得到卻不說。
+            #
+            # 但也不能報 ok：缺少的判據可能單獨觸發（本規則為 any/OR），
+            # 所以「沒有告警」在此狀態下**不等於確認平靜**。
+            # 這是「沒事」與「沒資料」之外的第三種情形，必須讓呼叫端分辨。
+            status = "partial"
 
         # 共同時間軸：所有被引用參數的取樣時刻聯集，前向填補
         timeline = pd.DatetimeIndex(sorted(set().union(*[set(s.index) for s in series.values()])))
@@ -281,7 +300,7 @@ class RiskEngine:
         on = stacked.any(axis=1) if rule.combine == "any" else stacked.all(axis=1)
 
         active = self._apply_hysteresis(rule, on, aligned, timeline)
-        return self._to_episodes(rule, active, aligned), "ok"
+        return self._to_episodes(rule, active, aligned), status
 
     @staticmethod
     def clear_thresholds(rule: Rule) -> dict[str, float]:

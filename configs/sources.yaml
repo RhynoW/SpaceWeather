@@ -313,6 +313,41 @@ sources:
       故暫不讓其驅動分級規則，見 docs/cwa_swoo_analysis.md。
       同一端點另含 kidx/DST/sws/XrayFx 等全球量，本案已有權威來源，刻意不取。
 
+  - source_id: tacc_scn1c2
+    name: 福衛七號掩星閃爍指數（TACC scn1c2）
+    connector: tacc_scint
+    tier: 1
+    attribution:
+      provider: 'TACC（Taiwan Analysis Center for COSMIC，交通部中央氣象署）／UCAR CDAAC'
+      product: '福衛七號 TGRS 接收機星上運算之 S4 振幅閃爍指數（scn1c2），10 秒節奏，逐掩星事件。本案取臺灣周邊（18–28°N、116–126°E）並以 15 分鐘分箱取最大值'
+      url: 'https://tacc.cwa.gov.tw/v2/download.html'
+      terms: 'Release Memorandum（F7C2_SpWx_DataRelease_5.pdf）為技術性釋出說明，未見註冊要求或再散布限制；正式取用條款由合作夥伴（成功大學團隊）於兩年期計畫內確認。引用時須標註 TACC 與 UCAR CDAAC'
+    status: ready
+    provides: [S4]
+    cadence_s: 900
+    latency_budget_s: 172800
+    publication_lag_s: 86400
+    # 採 TDPC 而非 TROPS：兩者的 netCDF 結構不同，**只有 TDPC 版本含 RFI 指數**，
+    # 而 memo 明載 RFI 會產生虛假 S4。TROPS 版無此欄位，無從篩檢。
+    endpoint: https://tacc.cwa.gov.tw/data-service/fs7rt_tdpc/daily_tar/{date}/scn1c2_{date}.tar.gz
+    format: tacc_scn1c2_tar
+    # 與 cwa_swoo 同因：TAIWAN-CA 中介憑證缺 Subject Key Identifier，
+    # Python 3.12+ 的 VERIFY_X509_STRICT 會拒絕。憑證鏈與主機名仍完整驗證。
+    tls_relaxed_strict: true
+    # 每日打包檔的產出時間不固定，往前試幾天再放棄
+    lookback_days: 4
+    notes: >
+      **唯一能讓 GNSS-L3-SCINT 規則脫離 unavailable 的連續資料源。**
+      單日打包檔約 72 MB（取代逐檔約 9,000–10,600 次請求），
+      **因此排除於背景自動更新之外**，與 gfz_hp30、omni2_hourly 同樣改由手動或排程處理。
+      **掩星幾何不是地面測站**：S4 取自臨邊射線切點附近，與 CWA SWOO 的地面站 S4
+      不是同一種量，不可在同一條規則中混用門檻。
+      **RFI 汙染會產生假的 S4**：Release Memo 載明權威的 RFI QC 旗標，
+      但實測本產品的 netCDF 只有 RFI 指數、沒有該旗標；模組以未校準的保守門檻
+      標 suspect 而非丟棄。**在取得該旗標前，本來源不應驅動分級規則**
+      （configs/rules/ 暫不引用），與 CWA TWDI 同樣處理。
+      詳見 docs/formosat7_tacc_analysis.md。
+
   - source_id: swpc_drap
     name: NOAA SWPC D-Region Absorption Prediction
     connector: forecast_sources
