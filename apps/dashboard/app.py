@@ -85,6 +85,35 @@ def coverage_note(row) -> tuple[str, str]:
             f"未評估：{missing}（缺資料，非未達門檻）")
 
 
+@st.cache_data(ttl=3600)
+def build_stamp() -> str:
+    """目前執行的是哪一個 commit。
+
+    存在的理由很實際：改完推上去後看不到新內容時，無法分辨是
+    「程式沒改對」還是「雲端還沒重新部署」。把 commit 顯示在側欄，
+    這個問題就從猜測變成一眼可見。
+
+    直接讀 `.git` 而不呼叫 git 指令——雲端容器不保證有 git 執行檔。
+    """
+    from pathlib import Path
+
+    try:
+        git = Path(__file__).resolve().parents[2] / ".git"
+        head = (git / "HEAD").read_text(encoding="utf-8").strip()
+        if not head.startswith("ref: "):
+            return head[:7]
+        ref = git / head[5:]
+        if ref.exists():
+            return ref.read_text(encoding="utf-8").strip()[:7]
+        # 打包過的 ref 不在檔案系統上，改查 packed-refs
+        for line in (git / "packed-refs").read_text(encoding="utf-8").splitlines():
+            if line.endswith(head[5:]):
+                return line.split()[0][:7]
+        return "unknown"
+    except Exception:      # noqa: BLE001 — 顯示不出版本不該讓整個 app 掛掉
+        return "unknown"
+
+
 def load_nowcast() -> pd.DataFrame:
     return RiskEngine(get_store()).nowcast()
 
@@ -574,6 +603,9 @@ st.sidebar.caption(
     "設計原則：缺資料顯示灰色「無資料」而非綠色「正常」——\n"
     "綠燈會讓人誤以為已確認該網域無異常。"
 )
+# 目前跑的是哪一個 commit。改完推上去後看不到新內容時，
+# 這一行能立刻分辨是「程式沒改對」還是「雲端還沒重新部署」。
+st.sidebar.caption(f"版本 `{build_stamp()}`")
 
 
 # ── 0. 值勤模式（一屏掌握全局）──────────────────────────────────────────
