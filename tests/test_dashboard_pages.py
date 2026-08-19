@@ -208,3 +208,45 @@ def test_every_page_has_a_url_slug():
         assert slug and slug.isascii() and slug.islower() and " " not in slug, (
             f"{page} 的代稱 {slug!r} 不適合放在網址上"
         )
+
+
+def _stem_media_calls() -> list[str]:
+    """STEM 頁實際引用的媒體 id（依原始碼出現順序）。"""
+    tree = ast.parse((Path(__file__).resolve().parents[1] / "apps" / "dashboard"
+                      / "stem.py").read_text(encoding="utf-8"))
+    out: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)                 and node.func.id in ("images_by_id", "animations_by_id"):
+            out += [a.value for a in node.args
+                    if isinstance(a, ast.Constant) and isinstance(a.value, str)]
+    return out
+
+
+def test_stem_shows_no_duplicate_media():
+    """同一張媒體不得在教學頁出現兩次。
+
+    重複顯示會讓學生以為那是兩件不同的事物，而這一頁的主要成本就是注意力。
+    """
+    used = _stem_media_calls()
+    dupes = sorted({x for x in used if used.count(x) > 1})
+    assert not dupes, f"STEM 頁重複引用：{dupes}"
+
+
+def test_stem_does_not_show_a_still_and_its_own_animation():
+    """不得同時放某張靜態圖與「同一張的動畫版」。
+
+    這是實際發生過的問題：第二節先放 sdo_304_video 與 soho_c2_video，
+    緊接著又放 sdo_euv_304 與 soho_lasco_c2 的靜態圖——同樣兩個主題
+    連續出現兩次。配對關係宣告在 configs/imagery.yaml 的 still_of，
+    因為那是資料的性質，新增動畫的人最清楚它拍的是哪一張。
+    """
+    from swx_core import animations
+
+    pairs = {a["id"]: a.get("still_of") for a in animations()}
+    used = set(_stem_media_calls())
+    clashes = sorted(
+        f"{anim} 與 {still}"
+        for anim, still in pairs.items()
+        if still and anim in used and still in used
+    )
+    assert not clashes, f"靜態圖與其動畫版同時出現：{clashes}"
