@@ -123,43 +123,7 @@ def age_badge(age_s: float | None) -> str:
 
 
 # ── 影像呈現 ────────────────────────────────────────────────────────────
-def image_url(item: dict) -> str:
-    """加上快取破除參數。
-
-    這些端點的檔名固定（latest.jpg），瀏覽器會沿用快取而顯示舊圖——
-    使用者以為看的是即時影像，實際上可能是幾小時前的。
-    以「當前時間對更新週期取整」當參數：同一個更新週期內共用快取（不浪費頻寬），
-    跨週期就強制重抓。
-    """
-    if item.get("kind") == "latest_json":
-        return _latest_json_image(item["latest_url"], item["url_template"],
-                                  int(item.get("cadence_s") or 600))
-    cadence = int(item.get("cadence_s") or 900)
-    bucket = int(datetime.now(timezone.utc).timestamp() // cadence)
-    sep = "&" if "?" in item["url"] else "?"
-    return f"{item['url']}{sep}_ts={bucket}"
-
-
-@st.cache_data(ttl=300)
-def _latest_json_image(latest_url: str, template: str, cadence_s: int) -> str:
-    """由索引 JSON 的時刻組出影像網址。
-
-    有些產製者不提供固定的 `latest.jpg`，只給一份帶時刻的索引
-    （NICT 的向日葵影像即是）。此時必須先讀索引再組網址，
-    寫死某個時刻的網址會在下一個更新週期就失效。
-
-    `cadence_s` 只用來決定快取分桶——索引本身也要跟著更新週期重抓，
-    否則會一直組出同一張舊圖。
-    """
-    import json
-    import urllib.request
-
-    with urllib.request.urlopen(latest_url, timeout=25) as resp:
-        date = json.load(resp)["date"]          # 'YYYY-MM-DD HH:MM:SS'
-    return template.format(
-        Y=date[0:4], M=date[5:7], D=date[8:10],
-        hhmmss=date[11:13] + date[14:16] + date[17:19],
-    )
+from media_url import image_url  # noqa: E402  單一實作，見該模組說明
 
 
 def _attr_line(item: dict) -> str:

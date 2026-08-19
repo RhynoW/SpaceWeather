@@ -46,3 +46,52 @@ def test_sidebar_offers_every_documented_page():
     app = AppTest.from_file(APP_PATH, default_timeout=120)
     app.run()
     assert list(app.sidebar.radio[0].options) == PAGES
+
+
+def _stem_still_ids() -> list[str]:
+    """STEM 頁引用、且屬於靜態影像（非動畫）的媒體 id。"""
+    import ast
+    import sys
+
+    root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(root / "packages"))
+    from swx_core import animations, imagery
+
+    still = {i["id"] for i in imagery()}
+    anim = {a["id"] for a in animations()}
+    src = (root / "apps" / "dashboard" / "stem.py").read_text(encoding="utf-8")
+    out = []
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)                 and node.func.id == "images_by_id":
+            out += [a.value for a in node.args
+                    if isinstance(a, ast.Constant) and a.value in still - anim]
+    return out
+
+
+def test_stem_renders_every_referenced_still():
+    """STEM 頁引用幾張靜態圖，就必須渲染出幾個影像元素。
+
+    **這條是為了抓一個實際漏掉的失效。** 新增了一種動態網址類型
+    （kind: latest_json，網址帶時刻、無固定 latest.jpg），只改了 app.py
+    的解析函式；stem.py 的媒體卡另有一份複製品，仍直接讀 item["url"]。
+    該欄位在這類影像上不存在，KeyError 被卡片的 except 吞掉，
+    顯示成「載入失敗」——看起來像對方站台掛了，其實是本地邏輯漏改。
+
+    當時的 smoke test 只驗證網址解析得出來、抓得到圖，**沒有驗證頁面實際
+    渲染出幾張**，所以漏掉了。元素計數會直接抓到這件事。
+    """
+    expected = _stem_still_ids()
+    assert expected, "STEM 頁未引用任何靜態影像，此測試失去意義"
+
+    app = AppTest.from_file(APP_PATH, default_timeout=180)
+    app.query_params["page"] = "stem"
+    app.run()
+    assert not app.exception, "; ".join(str(e.message) for e in app.exception)
+
+    imgs = app.get("imgs")
+    assert len(imgs) == len(expected), (
+        f"引用 {len(expected)} 張靜態圖（{expected}），"
+        f"實際只渲染出 {len(imgs)} 個影像元素——有影像取不到網址"
+    )
+    warnings = [w.value for w in app.warning]
+    assert not warnings, f"STEM 頁出現載入警告：{warnings}"
