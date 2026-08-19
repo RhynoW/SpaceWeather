@@ -198,7 +198,10 @@ def drag_residual(df: pd.DataFrame, sw: pd.DataFrame | None = None) -> pd.DataFr
 
     輸入需含 epoch、sma_km（可選 eccentricity）。
     回傳 epoch / da_km / drag_pred_da / drag_resid_da / rho / alt_km，
-    並於 .attrs['B_eff'] 帶回校準後的等效彈道係數。
+    並於 .attrs 帶回 'B_eff'（校準後的等效彈道係數）與 'snr'。
+
+    **務必檢查 snr。** 低於約 1 時 B_eff 主要由雜訊決定，不可用於密度反演；
+    此函式不會因此報錯或回空表。
     """
     from scipy.special import ive
 
@@ -239,7 +242,15 @@ def drag_residual(df: pd.DataFrame, sw: pd.DataFrame | None = None) -> pd.DataFr
             "alt_km": alt_p,
         }
     )
+    # 訊噪比：阻力預期衰減量 vs 擬合殘差。**低 SNR 時 B_eff 仍會回傳一個看似正常的值**，
+    # 呼叫端若不檢查就會拿雜訊當彈道係數。實測福衛七號（550 km，2024–2026 TLE）：
+    # 每日阻力衰減僅約 40 m，而 TLE 半長軸逐日雜訊達數百公尺 → SNR 約 0.07，
+    # 六顆同型同軌道衛星擬合出的 B_eff 相差 30%。高軌 + TLE 的組合不適用此法，
+    # 須改用精密定軌（cm 級）為輸入。詳見 docs/formosat7_tacc_analysis.md §六之二。
+    resid_rms = float(np.sqrt(np.nanmean((da - pred) ** 2)))
+    pred_med = float(np.nanmedian(np.abs(pred)))
     out.attrs["B_eff"] = B_eff
+    out.attrs["snr"] = pred_med / resid_rms if resid_rms > 0 else float("nan")
     return out
 
 
