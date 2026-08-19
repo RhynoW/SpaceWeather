@@ -498,6 +498,16 @@ params:
     cadence_s: 21600
     impacts: [ORBIT_PREDICTION]
     status: ready
+  - code: DRAG_ENHANCEMENT
+    name_zh: 觀測密度增強倍數
+    name_en: Observed density enhancement factor
+    unit: "1"
+    domain: thermo
+    valid_min: 0.0
+    valid_max: 20.0
+    cadence_s: 21600
+    impacts: [ORBIT_PREDICTION]
+    status: ready
   - code: RHO_RATIO
     name_zh: 觀測／模型密度比值
     name_en: Observed-to-model density ratio

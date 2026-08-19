@@ -11,9 +11,12 @@
 
     rho_storm / rho_quiet = (da/dt)_storm / (da/dt)_quiet
 
-因此本模組交付的是 `DRAG_DECAY`（衰減率本身，m/日），
-下游要的密度比值由它相除即得，不需要任何非公開的衛星參數，
-也沒有「以 MSIS 擬合 B 再拿去反演 MSIS」的循環論證。
+因此本模組交付兩個參數：
+  `DRAG_DECAY`        衰減率本身（m/日），純觀測量
+  `DRAG_ENHANCEMENT`  相對滾動基線的增強倍數（無因次），**分子分母皆為觀測**
+
+不需要任何非公開的衛星參數，也沒有「以 MSIS 擬合 B 再拿去反演 MSIS」的
+循環論證——這是它能宣稱 `inference = observed` 的依據。
 
 ## 為什麼非用精密定軌不可
 
@@ -29,6 +32,13 @@ leoOrb 的弧段重疊一致性為 **0.25 m**，平滑後的估計雜訊約 5 m�
 實測曾因此把 7.7 m/日 誤讀為 39 m/日，也曾把一次明確的機動誤判為「無機動」。
 本模組以軌道週期（約 96.3 分鐘）為窗做中心移動平均，實測可把
 逐點變異由 1118 m 壓到 13 m。
+
+## 時間標記是**尾隨**的
+
+衰減率由相鄰分箱的半長軸相減而得，故標在 `t` 的值描述的是 `t-6h` 到 `t`
+這段區間，不是 `t` 當下。實測可見：2024-05-10 12:00 UT 的 Kp 已達 7.67，
+但該箱的增強倍數仍是 0.91——因為它涵蓋的 06:00–12:00 早於 17:05 的暴起始。
+作業上判讀時必須把這個尾隨特性算進去，本參數不適合當即時的暴起始指標。
 
 ## 機動的處理
 
@@ -57,6 +67,24 @@ BIN = "6h"                    # 交付節奏；短於此則衰減量接近估計
 DISPERSION_SUSPECT = 0.25     # 跨衛星標準差／中位數的上限；超過即疑有機動或資料問題
 MIN_SATS = 3                  # 少於此數不足以用中位數排除離群
 MIN_COVERAGE = 0.8            # 分箱內平滑後樣本的最低覆蓋率
+
+# ── 增強倍數的基線 ────────────────────────────────────────────────
+# **必須先扣掉太陽通量的貢獻，否則會把太陽週期當成事件效應。**
+# 實測 2024-04-29 → 2024-05-19 的 21 天內 F10.7 由 132 漲到 238，
+# 衰減率隨之由 40 漲到 55 m/日；若以滾動分位數當基線，平靜期的「增強倍數」
+# 會是 1.4–1.65 而非 1.0，L1 因此持續誤觸發。
+# 這正是 orbit_drag.density_ratio 早已載明的陷阱（基準二：同一 F10.7、地磁寧靜）。
+#
+# 作法：以**地磁寧靜的分箱**擬合 log(衰減率) ~ a + b*F10.7，再以該式預測
+# 「同一 F10.7、地磁寧靜」應有的衰減率，觀測值除以它即為地磁造成的增強。
+# **分子分母皆為觀測量**（衰減率、F10.7、Kp 都是觀測），故不引入模型，
+# 也不繼承模型在暴時的偏差——這是本參數能宣稱 inference=observed 的依據。
+FIT_WINDOW_D = 120            # 擬合取樣窗；需夠長才涵蓋足夠的 F10.7 變化
+FIT_MIN_SAMPLES = 48          # 寧靜分箱數下限（約 12 天）
+QUIET_KP = 4.0                # 視為地磁寧靜的 Kp 上限
+# b 的物理容許範圍：對應 F10.7 每增加 46–347 sfu 密度加倍。
+# 超出此範圍代表擬合被離群值帶走，夾住比輸出明顯錯誤的值安全。
+B_MIN, B_MAX = 0.002, 0.015
 
 EOP_MEMBER = "eop.csv"
 EOP_URL = "https://celestrak.org/SpaceData/EOP-Last5Years.csv"
@@ -184,6 +212,73 @@ def rates_to_frame(rate: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def fit_quiet_baseline(decay: pd.Series, f107: pd.Series, kp: pd.Series
+                       ) -> tuple[float, float] | None:
+    """以地磁寧靜的分箱擬合 log(衰減率) ~ a + b*F10.7。
+
+    回傳 (a, b)；樣本不足或擬合不合物理時回 None——**不回退成常數基線**，
+    因為那等於默默把太陽週期算進事件效應。
+    """
+    if decay.empty:
+        return None
+    f = f107.reindex(decay.index, method="ffill")
+    k = kp.reindex(decay.index, method="ffill")
+    ok = (k < QUIET_KP) & np.isfinite(f) & np.isfinite(decay) & (decay > 0)
+    if int(ok.sum()) < FIT_MIN_SAMPLES:
+        return None
+    b, a = np.polyfit(f[ok].to_numpy(dtype=float),
+                      np.log(decay[ok].to_numpy(dtype=float)), 1)
+    if not np.isfinite(a) or not np.isfinite(b):
+        return None
+    return float(a), float(np.clip(b, B_MIN, B_MAX))
+
+
+def enhancement_rows(decay: pd.DataFrame, history: pd.Series | None,
+                     f107: pd.Series, kp: pd.Series) -> pd.DataFrame:
+    """由 DRAG_DECAY 算出無因次的密度增強倍數 DRAG_ENHANCEMENT。
+
+    `rho_now / rho_quiet = (da/dt)_now / (da/dt)_quiet` —— 彈道係數在比值中
+    完全消掉。分母取「同一 F10.7、地磁寧靜」的期望值（見上方常數區說明）。
+
+    樣本不足時回空表而**不是**回 1.0——「算不出來」與「沒有增強」是兩件事。
+    """
+    if decay.empty or f107.empty or kp.empty:
+        return empty_frame()
+    fresh = pd.Series(decay["value"].to_numpy(dtype=float),
+                      index=pd.DatetimeIndex(decay["valid_time"]))
+    pool = fresh if history is None or history.empty else pd.concat(
+        [pd.Series(history.to_numpy(dtype=float), index=pd.DatetimeIndex(history.index)),
+         fresh])
+    pool = pool[~pool.index.duplicated(keep="last")].sort_index()
+    pool = pool[pool.index > pool.index.max() - pd.Timedelta(days=FIT_WINDOW_D)]
+
+    fit = fit_quiet_baseline(pool, f107, kp)
+    if fit is None:
+        return empty_frame()
+    a, b = fit
+
+    f = f107.reindex(fresh.index, method="ffill")
+    expected = np.exp(a + b * f.to_numpy(dtype=float))
+    val = fresh.to_numpy(dtype=float) / expected
+    keep = np.isfinite(val) & (expected > 0)
+    if not keep.any():
+        return empty_frame()
+
+    out = pd.DataFrame({
+        "valid_time": fresh.index[keep],
+        "param_code": "DRAG_ENHANCEMENT",
+        "value": val[keep],
+        "unit": "1",
+        "data_type": "OBS",
+    })
+    # 品質沿用 DRAG_DECAY 的旗標：離散度高的那一箱，其比值同樣可疑
+    flags = decay.set_index("valid_time")[["quality_flag", "quality_reason"]]
+    joined = flags.reindex(out["valid_time"])
+    out["quality_flag"] = joined["quality_flag"].to_numpy()
+    out["quality_reason"] = joined["quality_reason"].to_numpy()
+    return out
+
+
 class TaccLeoOrbConnector(Connector):
     """TACC `leoOrb` 每日打包檔（SP3-c 精密定軌）。
 
@@ -308,6 +403,28 @@ class TaccLeoOrbConnector(Connector):
         df = rates_to_frame(decay_rates(sma_from_sp3(frames, eop)))
         if df.empty:
             return df
+
+        # 增強倍數需要 27 日基線，故要讀既有序列。這讓 parse 不再是純函式，
+        # 但替代方案（另設一個衍生階段）會讓「原始檔落地即可完整重現」的
+        # 性質失效——基線本來就依賴歷史，藏在別處只是把耦合換個地方。
+        f107, kp, hist = self._drivers()
+        df = pd.concat([df, enhancement_rows(df, hist, f107, kp)], ignore_index=True)
         df["source_id"] = self.spec.source_id
         df["source_tier"] = self.spec.tier
         return normalize(df)
+
+    def _drivers(self) -> tuple[pd.Series, pd.Series, pd.Series | None]:
+        """取基線擬合所需的 F10.7、Kp 與既有 DRAG_DECAY。
+
+        取不到時回空序列，增強倍數即略過——寧可不產出，也不要用錯的基線。
+        """
+        empty = pd.Series(dtype="float64", index=pd.DatetimeIndex([], tz="UTC"))
+        store = getattr(self, "store", None)
+        if store is None:
+            return empty, empty, None
+        def _get(code: str) -> pd.Series:
+            try:
+                return store.series(code, observed_only=True)
+            except Exception:  # noqa: BLE001 — 首次執行時序列可能尚不存在
+                return empty
+        return _get("F107_OBS"), _get("KP_3H"), _get("DRAG_DECAY")

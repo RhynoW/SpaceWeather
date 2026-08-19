@@ -13,7 +13,7 @@
 | [docs/data_sources_c2c3.md](docs/data_sources_c2c3.md) | 地磁與電離層資料源盤查（C2/C3 風險分級之修正） |
 | [docs/forecast_verification.md](docs/forecast_verification.md) | 預報引擎驗證報告（切分明細、列聯表、未達 KPI 之落差） |
 | [docs/density_model_validation.md](docs/density_model_validation.md) | 大氣密度模型配置、修正因子定義與驗證邊界 |
-| [docs/operations_manual.md](docs/operations_manual.md) | **值勤手冊**（燈號判讀、15 條規則處置對照、維運指令、使用邊界） |
+| [docs/operations_manual.md](docs/operations_manual.md) | **值勤手冊**（燈號判讀、19 條規則處置對照、維運指令、使用邊界） |
 | [docs/glossary.md](docs/glossary.md) | **名詞說明與參數判讀**（教育推廣、值勤判讀、常見誤讀） |
 | [docs/research_review.md](docs/research_review.md) | **依公開學術研究的強化檢視**（文獻對照、建議順序） |
 | [docs/cwa_swoo_analysis.md](docs/cwa_swoo_analysis.md) | 中央氣象署 SWOO 架構分析與介接記錄（授權依據、待確認事項） |
@@ -139,10 +139,10 @@ pip install -r requirements.lock   # 重現本文數字時使用
 | 層 | 模組 | 狀態 |
 |---|---|---|
 | 擷取層 | `services/ingest` | ✅ 22 個來源（19 個可運作）：CelesTrak、GFZ ×2、SWPC ×9、Kyoto、NASA OMNI2、**中央氣象署 SWOO**、**福衛七號 TACC ×2**（閃爍 `scn1c2`、精密定軌 `leoOrb`）。其中 15 個納入背景自動更新 |
-| 資料層 | `packages/swx_core` | ✅ 雙時間軸 Parquet + DuckDB、品質三級制、45 個註冊參數 |
+| 資料層 | `packages/swx_core` | ✅ 雙時間軸 Parquet + DuckDB、品質三級制、46 個註冊參數 |
 | 模型層 | `packages/orbit_drag`、`packages/geomag` | ✅ 熱氣層密度／阻力（MSIS 2.1，暴時 ap 模式）＋地磁基準場（IGRF-14）；電離層 D 層吸收已接 |
 | 預報層 | `services/forecast` | ⚠️ **功能覆蓋** 1–48 h Kp 預報＋驗證擂台。**任何 horizon 皆非正式作業產品**；1–12 h 可作研究參考，**>12 h 為非作業性研究預報**（與 API 的 `not_for_operational_use_beyond_h: 12` 一致） |
-| 風險層 | `services/risk_engine` | ✅ 3 網域 15 條規則、事件卡、作業狀態庫 |
+| 風險層 | `services/risk_engine` | ✅ 3 網域 19 條規則、事件卡、作業狀態庫 |
 | 產品層 | `services/exporter` | ✅ STK/GMAT CSSI 驅動檔、密度修正因子表 |
 | 展示層 | `services/api`、`apps/dashboard` | ✅ REST API＋Streamlit 儀表板（含值勤模式、影像頁、使用指南與四語 STEM 教學頁），端點與頁面集合由契約測試守住，且每頁以 AppTest 實跑驗證可渲染 |
 

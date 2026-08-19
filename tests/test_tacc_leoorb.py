@@ -9,11 +9,15 @@ import pandas as pd
 import pytest
 
 from services.ingest.tacc_leoorb import (
+    B_MAX,
+    B_MIN,
     BIN,
     DISPERSION_SUSPECT,
     GPS_MINUS_UTC_S,
     MU,
     decay_rates,
+    enhancement_rows,
+    fit_quiet_baseline,
     parse_sp3,
     rates_to_frame,
 )
@@ -155,3 +159,80 @@ def test_bin_cadence_matches_declared():
     assert len(gaps) == 1
     assert pd.Timedelta(gaps[0]) == pd.Timedelta(BIN)
     assert DISPERSION_SUSPECT > 0.12, "門檻須高於平靜期實測的離散度上緣"
+
+
+# ── 增強倍數：必須先扣掉太陽通量 ────────────────────────────────────
+def _drivers(idx, f107_start=130.0, f107_end=240.0, kp=2.0):
+    f = pd.Series(np.linspace(f107_start, f107_end, len(idx)), index=idx)
+    k = pd.Series(kp, index=idx)
+    return f, k
+
+
+def test_enhancement_removes_solar_flux_trend():
+    """F10.7 上升造成的衰減增加不得被當成事件效應。
+
+    這是實測踩到的坑：2024-04-29 至 05-19 的 F10.7 由 132 漲到 238，
+    以滾動分位數當基線時平靜期的「增強倍數」是 1.4–1.65 而非 1.0，
+    L1 因此持續誤觸發。
+    """
+    idx = pd.date_range("2024-03-01", periods=200, freq="6h", tz="UTC")
+    f107, kp = _drivers(idx)
+    # 衰減率完全由 F10.7 驅動、無地磁事件 → 增強倍數應恆為 1
+    decay_val = 20.0 * np.exp(0.0058 * f107.to_numpy())
+    decay = pd.DataFrame({
+        "valid_time": idx, "param_code": "DRAG_DECAY", "value": decay_val,
+        "unit": "m/day", "data_type": "OBS",
+        "quality_flag": "good", "quality_reason": "",
+    })
+    out = enhancement_rows(decay, None, f107, kp)
+    assert not out.empty
+    assert out["value"].mean() == pytest.approx(1.0, abs=0.02)
+    assert out["value"].std() < 0.02
+
+
+def test_enhancement_keeps_geomagnetic_signal():
+    """扣掉太陽通量後，地磁造成的增強必須保留。"""
+    idx = pd.date_range("2024-03-01", periods=200, freq="6h", tz="UTC")
+    f107, kp = _drivers(idx)
+    decay_val = 20.0 * np.exp(0.0058 * f107.to_numpy())
+    storm = slice(150, 155)
+    decay_val = decay_val.copy()
+    decay_val[storm] *= 4.0
+    kp = kp.copy()
+    kp.iloc[storm] = 9.0                      # 暴時分箱不得進入寧靜擬合
+    decay = pd.DataFrame({
+        "valid_time": idx, "param_code": "DRAG_DECAY", "value": decay_val,
+        "unit": "m/day", "data_type": "OBS",
+        "quality_flag": "good", "quality_reason": "",
+    })
+    out = enhancement_rows(decay, None, f107, kp).set_index("valid_time")["value"]
+    assert out.iloc[storm].mean() == pytest.approx(4.0, rel=0.05)
+    quiet = out.drop(out.index[storm])
+    assert quiet.mean() == pytest.approx(1.0, abs=0.03)
+
+
+def test_enhancement_returns_empty_when_undercalibrated():
+    """寧靜樣本不足時回空表，而不是退回 1.0。
+
+    「算不出來」與「沒有增強」是兩件事——後者會讓下游誤以為已確認平靜。
+    """
+    idx = pd.date_range("2024-03-01", periods=20, freq="6h", tz="UTC")
+    f107, kp = _drivers(idx)
+    decay = pd.DataFrame({
+        "valid_time": idx, "param_code": "DRAG_DECAY", "value": np.full(20, 50.0),
+        "unit": "m/day", "data_type": "OBS",
+        "quality_flag": "good", "quality_reason": "",
+    })
+    assert enhancement_rows(decay, None, f107, kp).empty
+    assert fit_quiet_baseline(
+        pd.Series(50.0, index=idx), f107, kp) is None
+
+
+def test_baseline_fit_slope_is_clipped_to_physical_range():
+    """擬合斜率被離群值帶走時須夾在物理範圍內。"""
+    idx = pd.date_range("2024-03-01", periods=200, freq="6h", tz="UTC")
+    f107, kp = _drivers(idx, 150.0, 150.6)     # F10.7 幾乎不變 → 斜率不可信
+    noisy = pd.Series(50.0 * (1 + 0.5 * np.sin(np.arange(200))), index=idx)
+    fit = fit_quiet_baseline(noisy, f107, kp)
+    assert fit is not None
+    assert B_MIN <= fit[1] <= B_MAX

@@ -323,7 +323,7 @@ sources:
       url: 'https://tacc.cwa.gov.tw/v2/download.html'
       terms: 'Release Memorandum（F7C2_SpWx_DataRelease_5.pdf）為技術性釋出說明，未見註冊要求或再散布限制；正式取用條款由合作夥伴（成功大學團隊）於兩年期計畫內確認。引用時須標註 TACC 與 UCAR CDAAC'
     status: ready
-    provides: [DRAG_DECAY]
+    provides: [DRAG_DECAY, DRAG_ENHANCEMENT]
     cadence_s: 21600
     latency_budget_s: 259200
     publication_lag_s: 86400
@@ -339,8 +339,10 @@ sources:
       與乾重**皆未公開**，故無法解出絕對密度；但**取比值時 B 完全消掉**，
       密度增強倍數因此可由本序列相除直接得到，不需任何非公開的衛星參數。
       實測 2024-05 Gannon 事件：暴前基線約 60 m/日，2024-05-11 06:00 UT
-      峰值達 270 m/日，**密度增強 4.67 倍**，而 MSIS 2.1 沿同一軌跡僅給 2.28 倍
-      ——**模型低估約一倍**。平靜期觀測與模型吻合在 ±10% 內。
+      峰值達 265.6 m/日；扣除 F10.7 貢獻後的 DRAG_ENHANCEMENT 峰值為 **4.01 倍**。
+      同期 MSIS 2.1 的 storm_ratio 僅 2.30，且比值隨增強倍數單調上升
+      （<1.5 時 0.85、1.5–2.5 時 1.40、>=3.5 時 1.70）——**模式的暴時響應被壓縮**。
+      密度響應對 Kp 高度非線性：Kp 6–7 的增強中位僅 1.19，Kp>=7 才到 2.34。
       單日打包檔約 1.4–2.2 MB，一次抓 4 天，**排除於背景自動更新之外**。
       詳見 docs/formosat7_tacc_analysis.md。
 

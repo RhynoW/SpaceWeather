@@ -1,8 +1,19 @@
 # L0–L4 分級規則：軌道預報網域（架構書 §9.1）
 #
 # 這是全案唯一「既有能力已可支撐」的網域：地磁擾動 → 熱氣層密度上升 → 阻力增加
-# → 低軌軌道預報誤差上升。門檻以 Kp/Ap 為主，未來接上 RHO_RATIO 觀測反演後
-# 可改以「實測密度比值」為主判據（見 §7.1）。
+# → 低軌軌道預報誤差上升。
+#
+# 判據分兩組：
+#   ORB-L*-KP*    地磁**代理**。Kp/Ap 高不等於密度一定高，只是相關。
+#   ORB-L*-DRAG   福衛七號精密定軌反演的**實測**密度增強倍數（DRAG_ENHANCEMENT）。
+#
+# DRAG 組帶 requires_params，資料缺席時該規則為 unavailable 而非 L0——
+# 「沒有實測密度」與「實測密度正常」是兩件事。此時網域會落在 partial：
+# 手上只有代理，無法確認。這正是要呈現的狀態。
+#
+# **為何判據是倍數而非 m/日**：DRAG_DECAY 是絕對速率，基線隨太陽週期變動近八倍
+# （實測 2024-05 約 59 m/日、2026-08 約 7.7 m/日）。固定門檻會在太陽極大期
+# 一直觸發、極小期永不觸發。
 #
 # 門檻現況為**初版建議值**，須與需求單位以 tools/whatif_threshold.py 校準後定版
 # （構想書 TRL 表已將此列為風險：避免過度告警或漏報）。
@@ -72,3 +83,82 @@ rules:
       暫緩非必要之低軌交會判定結論；追蹤異常衰減目標清單。
     notify: [SDA 操作席, 衛星操作單位, 太空發展科, 指揮鏈]
     exclusions: [機動, TLE 缺口外推, 自然再入]
+
+  # ── 實測密度判據（福衛七號精密定軌反演）────────────────────────────
+  # 門檻為**初版建議值**，依 2024-04-29 至 2024-05-19 的實測分布標定。
+  # 該窗共 83 個 6 小時分箱，其中 65 箱地磁寧靜（Kp < 4）：
+  #     中位 1.01、P90 1.42、P95 1.60、P98 1.77、**最大 1.98**
+  # 2024-05 Gannon 事件（近二十年最強）：
+  #     5/10 18:00 UT 1.33 → 5/11 00:00 3.30 → 06:00 **峰值 4.01**
+  #     → 12:00 3.53 → 18:00 2.34 → 5/12 06:00 回到 1.07
+  #
+  # L1 取 2.0：**恰在寧靜期實測最大值之上**，該窗內單箱與連續兩箱的誤報
+  # 皆為 0，而 Gannon 連續三箱觸發。L1 另加 dwell_h: 6（6 小時節奏下即
+  # 連續兩箱），因為雜訊不相關而暴期會持續，這比單純調高門檻更能保住靈敏度。
+  #
+  # **密度響應對 Kp 高度非線性**，這是 DRAG 組存在的理由。同一 21 天窗按 Kp 分層：
+  #     Kp < 4     n=61  中位 1.01  最大 1.98
+  #     Kp 5–6     n= 2  中位 1.21  最大 1.50
+  #     Kp 6–7     n= 6  中位 1.19  最大 1.49    ← G2–G3 幾乎不推升 550 km 密度
+  #     Kp >= 7    n= 7  中位 2.34  最大 4.01
+  # 該窗內 KP 組觸發 15 次、DRAG 組僅 4 次且全在 Gannon。
+  # 換言之 **Kp 代理在中等擾動時明顯過度告警**——這正是實測判據要修正的偏差。
+  #
+  # **注意 DRAG_ENHANCEMENT 是尾隨量**：標在 t 的值描述 t-6h 到 t。
+  # 2024-05-10 12:00 UT 的 Kp 已達 7.67 而增強仍為 0.91，因該箱早於 17:05 的暴起始。
+  # 故 KP 組仍有其作用：它給的是即時的前導訊號，DRAG 組給的是已發生的量值。
+  #
+  # **校準基礎僅一個 21 天窗、65 個寧靜樣本，很薄。** 尤其寧靜最大值 1.98
+  # 幾乎貼著 L1 門檻，樣本增加後極可能超過。定版仍須擴大樣本並與需求單位
+  # 以 tools/whatif_threshold.py 校準；在此之前 calibrated 維持 false。
+  - id: ORB-L1-DRAG
+    name: 熱氣層密度輕度上升（實測）
+    requires_params: [DRAG_ENHANCEMENT]
+    when:
+      any:
+        - {param: DRAG_ENHANCEMENT, op: ">=", value: 2.0, dwell_h: 6}
+    level: L1
+    hysteresis: {clear_below: 1.6, clear_dwell_h: 12}
+    impact: 低軌阻力達同一 F10.7 之寧靜期望值的兩倍，軌道預報誤差小幅擴大
+    action: 納入任務前提示；低軌目標維持既有更新頻率
+    notify: [SDA 操作席]
+    exclusions: [機動]
+
+  - id: ORB-L2-DRAG
+    name: 熱氣層密度顯著上升（實測）
+    requires_params: [DRAG_ENHANCEMENT]
+    when:
+      any:
+        - {param: DRAG_ENHANCEMENT, op: ">=", value: 2.5, dwell_h: 0}
+    level: L2
+    hysteresis: {clear_below: 2.0, clear_dwell_h: 12}
+    impact: 阻力達平靜期 2.5 倍，低軌軌道預報誤差明顯擴大
+    action: 通報衛星操作與 SDA 席；低軌目標軌道預報改以 6 小時更新
+    notify: [SDA 操作席, 衛星操作單位]
+    exclusions: [機動]
+
+  - id: ORB-L3-DRAG
+    name: 熱氣層密度大幅上升（實測）
+    requires_params: [DRAG_ENHANCEMENT]
+    when:
+      any:
+        - {param: DRAG_ENHANCEMENT, op: ">=", value: 3.2, dwell_h: 0}
+    level: L3
+    hysteresis: {clear_below: 2.6, clear_dwell_h: 12}
+    impact: 阻力達平靜期 3.2 倍以上；經驗模式在此區間已知會低估，修正因子不可直接採信
+    action: 低軌軌道預報改以 3 小時更新；碰撞篩選門檻放寬並人工複核
+    notify: [SDA 操作席, 衛星操作單位, 值班主管]
+    exclusions: [機動]
+
+  - id: ORB-L4-DRAG
+    name: 熱氣層密度極端上升（實測）
+    requires_params: [DRAG_ENHANCEMENT]
+    when:
+      any:
+        - {param: DRAG_ENHANCEMENT, op: ">=", value: 4.0, dwell_h: 0}
+    level: L4
+    hysteresis: {clear_below: 3.0, clear_dwell_h: 12}
+    impact: 阻力達平靜期四倍以上（2024-05 Gannon 等級）；短期軌道預報不可依既有修正因子外推
+    action: 暫停自動碰撞篩選之自動處置，全數人工複核；低軌軌道預報改以逐小時更新
+    notify: [SDA 操作席, 衛星操作單位, 值班主管]
+    exclusions: [機動]
