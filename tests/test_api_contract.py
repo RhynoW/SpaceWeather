@@ -1,6 +1,6 @@
 """API 介面契約測試（審查意見：文件寫死的端點數必須由測試守住）。
 
-README 與架構書都寫「13 個端點」。這種手工維護的數字會在新增端點時默默過期，
+README 與架構書都寫「N 個端點」。這種手工維護的數字會在新增端點時默默過期，
 而 API 是子計畫間的介接面——文件與實作不一致，介接方就會照著錯的文件開發。
 這裡把端點集合寫成契約：改了 API 就會紅燈，逼你同步改文件。
 
@@ -9,6 +9,9 @@ README 與架構書都寫「13 個端點」。這種手工維護的數字會在�
 """
 
 from __future__ import annotations
+
+import re
+from pathlib import Path
 
 import pytest
 
@@ -23,6 +26,7 @@ DOCUMENTED_ENDPOINTS = {
     ("GET", "/v1/health/data"),
     ("GET", "/v1/obs"),
     ("GET", "/v1/nowcast"),
+    ("GET", "/v1/forecast"),
     ("GET", "/v1/events"),
     ("GET", "/v1/events/<event_id>"),
     ("GET", "/v1/events/<event_id>/history"),
@@ -56,9 +60,11 @@ def test_endpoint_set_matches_documentation(app):
     assert not missing, f"文件列了但實作沒有的端點：{sorted(missing)}"
 
 
-def test_documented_endpoint_count_is_thirteen():
-    """README 寫「13 個端點」，數字變了就要改文件。"""
-    assert len(DOCUMENTED_ENDPOINTS) == 13
+def test_documented_endpoint_count_matches_readme():
+    """README 寫「N 個端點」，數字變了就要改文件（兩處同時改才會綠燈）。"""
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
+    documented = int(re.search(r"(\d+) 個端點", readme).group(1))
+    assert len(DOCUMENTED_ENDPOINTS) == documented
 
 
 def test_internal_exception_is_not_leaked_to_client(app):

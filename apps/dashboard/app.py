@@ -78,7 +78,11 @@ def coverage_note(row) -> tuple[str, str]:
     """
     total = int(row.get("criteria_total", 0) or 0)
     ok = int(row.get("criteria_ok", 0) or 0)
-    if not total or ok >= total:
+    if not total:
+        # 該網域已宣告，但還沒有任何規則。與「有規則但缺資料」不同因，
+        # 必須分開說——否則讀者無從判斷該去補資料還是去訂門檻。
+        return "尚無判據", "此網域尚未建立分級規則（不代表無風險）"
+    if ok >= total:
         return "", ""
     missing = str(row.get("unevaluated_rules", "") or "")
     return (f"判據 {ok}/{total}",
@@ -569,7 +573,7 @@ if _ORIGIN["is_demo"]:
 st.sidebar.title("🛰 SWX-SDA")
 st.sidebar.caption("太空天氣整合資訊與 SDA 應用系統")
 PAGES = ["值勤模式", "太空環境總覽", "太陽與行星際影像", "參數時序", "事件卡",
-         "太陽閃焰", "48 小時預報", "地磁基準場", "軌道與密度修正",
+         "太陽閃焰", "短時預報", "地磁基準場", "軌道與密度修正",
          "資料健康", "門檻校準", "名詞與判讀", "使用指南", "STEM 教學"]
 
 # 網址代稱：讓每一頁都能被直接連結。用 ASCII 而非中文頁名，
@@ -577,7 +581,7 @@ PAGES = ["值勤模式", "太空環境總覽", "太陽與行星際影像", "參�
 PAGE_SLUGS = {
     "值勤模式": "duty", "太空環境總覽": "overview", "太陽與行星際影像": "imagery",
     "參數時序": "series", "事件卡": "events", "太陽閃焰": "flares",
-    "48 小時預報": "forecast", "地磁基準場": "geomag", "軌道與密度修正": "density",
+    "短時預報": "forecast", "地磁基準場": "geomag", "軌道與密度修正": "density",
     "資料健康": "health", "門檻校準": "thresholds", "名詞與判讀": "glossary",
     "使用指南": "guide", "STEM 教學": "stem",
 }
@@ -627,7 +631,7 @@ if page == "值勤模式":
     render_status_banner(store)
     st.divider()
 
-    # ── 第一列：三網域燈號 ──────────────────────────────────────────
+    # ── 第一列：各網域燈號 ──────────────────────────────────────────
     # 「無資料」與「正常」必須用不同顏色。綠燈代表已確認無異常，
     # 沒有資料時給綠燈是這套系統最不能犯的錯。
     nowcast = load_nowcast()
@@ -642,10 +646,14 @@ if page == "值勤模式":
         infer = str(row.get("inference") or "observed")
         with col:
             if not available or lvl == "—":
+                # 「尚無判據」與「有判據但缺資料」是兩件事：前者要去訂門檻，
+                # 後者要去接資料。混在同一句話裡，值勤人員無從判斷該找誰。
+                no_criteria = int(row.get("criteria_total", 0) or 0) == 0
+                headline = "尚無判據" if no_criteria else "無資料"
                 st.markdown(
                     f"<div style='padding:14px;border-radius:8px;background:#3a3a3a;"
                     f"border-left:6px solid #888'><b>{row['domain']}</b><br>"
-                    f"<span style='font-size:2em'>無資料</span><br>"
+                    f"<span style='font-size:2em'>{headline}</span><br>"
                     f"<small>不代表無風險</small></div>",
                     unsafe_allow_html=True,
                 )
@@ -1013,58 +1021,160 @@ elif page == "太陽閃焰":
         st.plotly_chart(fig, width='stretch')
 
 
-# ── 5. 48 小時預報 ──────────────────────────────────────────────────────
-elif page == "48 小時預報":
-    st.title("48 小時預報")
+# ── 5. 短時預報 ────────────────────────────────────────────────────────
+elif page == "短時預報":
+    from services.forecast.features import TARGETS
+    from services.forecast.skill import (horizon_entry, latest_forecast_batch,
+                                         load_skill, skill_models)
+
+    st.title("短時預報")
+    st.caption("構想書議題三：未來 1、3、6 小時短時有效預報（本引擎另延伸至 48 小時）")
+
+    target = st.radio(
+        "預報目標", ["hp30", "kp"], horizontal=True,
+        format_func=lambda k: {"hp30": "Hp30　30 分鐘格點　1／3／6 h",
+                               "kp": "Kp　3 小時格點　3–48 h"}[k],
+        help="構想書要求的 1 小時產品建在 Hp30 上——Kp 是 3 小時指數，"
+             "以它為目標時 1 小時 horizon 只是同一個值換個說法。",
+    )
+    spec = TARGETS[target]
+    skill = load_skill()
 
     st.error(
-        "🚫 **24 小時以上的預報為研究階段產出，不建議用於作業決策。**　"
+        "🚫 **任何 horizon 的預報皆非正式作業產品。** 超過 12 小時者不得用於作業決策："
         "測試折 BSS 於 24h 起轉負（不優於「永遠報氣候頻率」），"
         "且訓練折 POD ≈ 0.83、測試折僅 0.02–0.38，過擬合落差存在於**所有 horizon**。"
-        "1–12 小時的技巧為正且勝過持續性基線，可作為輔助參考。"
     )
+
     store = get_store()
-    end = datetime.now(timezone.utc)
+    end_t = datetime.now(timezone.utc)
+    fcs = store.query([spec.code, spec.prob_code],
+                      start=end_t - timedelta(days=30), end=end_t + timedelta(days=3))
+    own = latest_forecast_batch(
+        fcs[fcs["source_id"] == "swx_forecast"] if not fcs.empty else fcs)
+    swpc = fcs[fcs["source_id"] == "swpc_geomag_forecast"] if not fcs.empty else fcs
+    obs = fcs[(fcs["param_code"] == spec.code)
+              & fcs["data_type"].isin(["OBS", "INT"])] if not fcs.empty else fcs
 
-    st.warning(
-        "**技巧隨 horizon 迅速下降是物理必然**：L1 太陽風只有約 30–60 分鐘傳播時間，"
-        "24 小時以上僅剩 27 日復現與氣候態可用。48 小時 horizon 上氣候平均勝過 ML 模型，"
-        "依 Tier 0 門檻不應上線。詳見 `docs/forecast_verification.md`。"
+    # 起報錨點對齊格點：觀測的 valid_time 可能落在格間（SWPC 估計 Kp 標在 00:05），
+    # 不對齊會讓 horizon 還原成 2.92 小時，技巧查表就查不到。
+    issued = (pd.Timestamp(obs["valid_time"].max()).floor(spec.grid)
+              if not obs.empty else None)
+
+    st.subheader("這個 horizon 的實測技巧")
+    st.caption(
+        "**預報值與技巧必須一起看。** 只看「Kp 3.2」而不看「這個 horizon 的誤警率 0.52、"
+        "中位提前量 0 小時」，無從判斷該不該據以行動——這正是構想書把命中率、誤警率、"
+        "提前量、可信度四項並列為 KPI 的用意。"
     )
 
-    fcs = store.query(["KP_3H", "KP_STORM_PROB"], start=end - timedelta(days=2),
-                      end=end + timedelta(days=3))
-    own = fcs[fcs["source_id"] == "swx_forecast"]
-    swpc = fcs[fcs["source_id"] == "swpc_geomag_forecast"]
-    obs = fcs[(fcs["param_code"] == "KP_3H") & fcs["data_type"].isin(["OBS", "INT"])]
+    rows = []
+    for h in spec.horizons:
+        entry = horizon_entry(skill, target, h)
+        best, base = skill_models(entry)
+        if not best:
+            continue
+        rows.append({
+            "horizon": f"{h} h",
+            "上線模型": best.get("model"),
+            "MAE": best.get("MAE"),
+            "命中率 POD": best.get("POD"),
+            "誤警率 FAR": best.get("FAR"),
+            "BSS": best.get("BSS"),
+            "事件段命中率": best.get("ep_recall"),
+            "中位提前量 (h)": best.get("lead_h_med"),
+            "提前量樣本": best.get("lead_n"),
+            "可信度": (entry or {}).get("confidence"),
+            "最佳基線": f"{base.get('model')}　MAE {base.get('MAE')}　POD {base.get('POD')}"
+            if base else "—",
+        })
 
+    if rows:
+        st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True)
+        meta = (skill.get("targets", {}) or {}).get(target, {})
+        st.caption(
+            f"來源：`docs/forecast_skill.json`（{meta.get('generated_utc', '—')} 產生，"
+            f"{meta.get('splits', '—')} 折滾動起報，樣本期間 "
+            f"{'～'.join(meta.get('sample_span_utc', ['—', '—']))}）。"
+            f"重跑：`{meta.get('command', '—')} --write-summary`"
+        )
+    else:
+        st.info("尚未產生驗證成績。執行 "
+                f"`python -m services.forecast.run --verify --target {target} --write-summary`")
+
+    if target == "hp30":
+        st.warning(
+            "**1 小時是目前唯一接近可用的產品，但不是全面勝出。** "
+            "gbm 贏在 MAE（−6.6%）、誤警率與機率品質（BSS 0.475），"
+            "但**持續性基線的命中率更高**（POD 0.729 對 0.601）。"
+            "要少漏報就該用持續性，要少誤報才選 gbm——這個取捨屬需求單位的決定。\n\n"
+            "**6 小時的中位提前量為 −0.75 小時**：多半在事件開始後才第一次命中，"
+            "是延遲偵測而非預報，不具作業價值。"
+        )
+    else:
+        st.warning(
+            "**技巧隨 horizon 迅速下降是物理必然**：L1 太陽風只有約 30–60 分鐘傳播時間，"
+            "24 小時以上僅剩 27 日復現與氣候態可用。48 小時 horizon 上氣候平均勝過 ML 模型，"
+            "依 Tier 0 門檻不應上線。\n\n"
+            "**3–12 小時的中位提前量皆為 0 小時**——命中時多半已進入事件一到兩格。"
+            "24／48 小時看似有提前量，但那是誤警率 0.84–0.95 的模型偶然命中，"
+            "提前量樣本僅 4／51，不具作業意義。"
+        )
+
+    st.divider()
+    st.subheader("預報序列")
     fig = go.Figure()
     if not obs.empty:
-        fig.add_scatter(x=obs["valid_time"], y=obs["value"], name="觀測",
-                        line=dict(width=3))
+        fig.add_scatter(x=obs["valid_time"], y=obs["value"], name="觀測", line=dict(width=3))
     if not swpc.empty:
-        s = swpc[swpc["param_code"] == "KP_3H"]
-        fig.add_scatter(x=s["valid_time"], y=s["value"], name="NOAA SWPC 官方預報",
-                        line=dict(dash="dash"))
+        sw = swpc[swpc["param_code"] == spec.code]
+        if not sw.empty:
+            fig.add_scatter(x=sw["valid_time"], y=sw["value"],
+                            name="NOAA SWPC 官方預報", line=dict(dash="dash"))
     if not own.empty:
-        s = own[own["param_code"] == "KP_3H"]
-        fig.add_scatter(x=s["valid_time"], y=s["value"], name="SWX 預報",
-                        line=dict(dash="dot"))
-    fig.add_hline(y=5, line_dash="dash", line_color="#d84315", annotation_text="G1 門檻")
-    fig.update_layout(height=380, margin=dict(l=0, r=0, t=10, b=0), yaxis_title="Kp")
+        o = own[own["param_code"] == spec.code]
+        fig.add_scatter(x=o["valid_time"], y=o["value"], name="SWX 預報", line=dict(dash="dot"))
+    if issued is not None:
+        fig.add_vline(x=issued.timestamp() * 1000, line_dash="dot", line_color="#888",
+                      annotation_text="起報錨點")
+    fig.add_hline(y=spec.storm_threshold, line_dash="dash", line_color="#d84315",
+                  annotation_text=f"{spec.short}≥{spec.storm_threshold:g}（G1 級）")
+    fig.update_layout(height=380, margin=dict(l=0, r=0, t=10, b=0), yaxis_title=spec.short)
     st.plotly_chart(fig, width='stretch')
 
     if own.empty:
         st.info("尚未產生本系統預報。執行 "
-                "`python -m services.forecast.run --predict --write`")
+                f"`python -m services.forecast.run --predict --write --target {target}`")
     else:
-        prob = own[own["param_code"] == "KP_STORM_PROB"]
-        if not prob.empty:
-            st.subheader("地磁暴機率 P(Kp≥5)")
-            fig2 = px.bar(prob, x="valid_time", y="value")
-            fig2.update_layout(height=240, margin=dict(l=0, r=0, t=10, b=0),
-                               yaxis_tickformat=".0%")
-            st.plotly_chart(fig2, width='stretch')
+        o = own[own["param_code"] == spec.code].sort_values("valid_time")
+        prob = (own[own["param_code"] == spec.prob_code]
+                .set_index("valid_time")["value"].to_dict())
+        table = []
+        for _, r in o.iterrows():
+            h = None if issued is None else round(
+                (pd.Timestamp(r["valid_time"]) - issued).total_seconds() / 3600, 2)
+            entry = None if h is None else horizon_entry(skill, target, h)
+            best, _b = skill_models(entry)
+            table.append({
+                "目標時刻 (UTC)": pd.Timestamp(r["valid_time"]).strftime("%m-%d %H:%M"),
+                "horizon": "—" if h is None else f"{h:g} h",
+                spec.short: round(float(r["value"]), 2),
+                f"P(≥{spec.storm_threshold:g})": f"{prob.get(r['valid_time'], float('nan')):.1%}"
+                if r["valid_time"] in prob else "—",
+                "可信度": None if pd.isna(r.get("confidence")) else round(float(r["confidence"]), 2),
+                # 缺席用 None 而非「—」：混型欄位會讓表格序列化失敗，
+                # 而且空白讀作「沒量過」，比一個破折號更不會被誤讀成 0
+                "該 horizon 的 FAR": (best or {}).get("FAR"),
+                "該 horizon 的中位提前量": (best or {}).get("lead_h_med"),
+            })
+        st.dataframe(pd.DataFrame(table), width='stretch', hide_index=True)
+        if issued is not None:
+            age_h = (end_t - issued).total_seconds() / 3600
+            st.caption(f"起報錨點（最新觀測對齊 {spec.grid} 格點）"
+                       f"{issued:%Y-%m-%d %H:%M}Z；距今 {age_h:.0f} 小時。")
+            if age_h > 6:
+                st.warning(f"⚠ 資料已落後 {age_h:.0f} 小時，上表目標時刻皆為過去，"
+                           "僅供流程驗證，不可作為現況判讀。")
 
     st.divider()
     st.subheader("與官方預報的關係")
@@ -1073,6 +1183,8 @@ elif page == "48 小時預報":
         "但 SWPC 只發布當前一份、取不到歷史版本，因此無法回測比較，"
         "只能自累積之日起做前瞻比較。**在累積足夠樣本前，不應宣稱本引擎優於官方預報。**"
     )
+    st.caption("完整擂台（含所有基線與列聯表）見 `docs/forecast_verification.md`；"
+               "機器可讀版見 `docs/forecast_skill.json`，API 為 `GET /v1/forecast`。")
 
 
 # ── 6. 地磁基準場（議題二）─────────────────────────────────────────────

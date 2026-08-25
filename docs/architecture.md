@@ -306,6 +306,22 @@ ORDER BY valid_time, source_tier, ingest_time DESC;
 - **Tier 1 統計／物理啟發**：太陽風–磁層耦合函數 → Kp/Dst 遞推；TEC 日變化＋擾動殘差。變點偵測直接用 `statistical_detectors.py`（B3）的 CUSUM/BOCPD/SSA/3σ-MAD。
 - **Tier 2 機器學習**：以 `lstm_autoencoder.py`／`patch_transformer.py`（B4）為骨架，輸出**機率分布**而非單點值。
 
+### 8.1.1 兩組預報目標（實作後補記）
+
+構想書要求 1／3／6 小時三種產品。實作時發現 **1 小時 horizon 不能建在 Kp 上**：
+Kp 是 3 小時指數，1 小時 horizon 得到的是同一個 3 小時值的另一種說法，
+而暴起始時刻本身已被 3 小時取樣糊掉 1–2 小時，提前量根本量不出來。
+
+故預報層改為兩組目標並行，各自訓練、各自驗證，成績不可橫向比較：
+
+| 目標 | 格點 | horizon | 用途 |
+|---|---|---|---|
+| `KP_3H` | 3 小時 | 3／6／12／24／48 h | 既有產品；48 h 為研究性延伸 |
+| `HP30` | 30 分鐘 | **1**／3／6 h | 構想書的 1 小時產品；提前量可量測 |
+
+Hp30 例行擷取只解析近 120 天（全檔逾 70 萬列），訓練用歷史以
+`--reparse --window-days 2100` 由既有原始落地檔重新解析取得，不需重抓。
+
 ### 8.2 驗證擂台（直接移植 `three_layer_common_eval.py` 的方法論）
 
 該檔的設計正是為了回應「三層各用不同測試集、數值不可比」的審查意見，本案面臨完全相同的問題（基線 vs 統計 vs ML 預報），故整套移植：
@@ -319,7 +335,7 @@ ORDER BY valid_time, source_tier, ingest_time DESC;
 | naive 隨機分數對照 | 同左，驗證擂台具鑑別力 |
 | `bootstrap_ci.py` 信賴區間 | 同左，指標需附 CI 而非單一數字 |
 
-**指標**：POD、FAR、CSI、Heidke skill score、平均提前量、可靠度圖、Brier skill score，全部附 bootstrap CI。輸出 `validation_report.html` 作為期末報告附件。
+**指標**：POD、FAR、CSI、Heidke skill score、**事件段命中率與提前量**、可靠度圖、Brier skill score，MAE 附 bootstrap CI。提前量以事件段計（定義見 docs/forecast_verification.md），可為負值代表事後偵測；必須與事件段命中率並列，單獨呈現會誤導。輸出 `validation_report.html` 作為期末報告附件。
 
 ### 8.3 模型登錄
 
@@ -383,7 +399,8 @@ rules:
 GET  /v1/params                              參數字典
 GET  /v1/obs?param=DST&from=&to=&as_of=      觀測序列（as_of 觸發回放）
 GET  /v1/nowcast                             各網域即時等級
-GET  /v1/forecast?horizon=1|3|6              預報序列＋信心度
+GET  /v1/forecast?target=kp|hp30&horizon=    預報序列＋信心度＋該 horizon 實測技巧
+                                             （已實作：每列附 POD/FAR/提前量與最佳基線）
 GET  /v1/events  |  /v1/events/{id}          事件清單／事件卡
 POST /v1/risk/mission-brief                  任務前風險提示
 GET  /v1/matrix/band-impact                  多頻段影響矩陣與查核表
@@ -615,21 +632,24 @@ SpaceWeather/
 
 ---
 
-## 16.1 實作現況（2026-08-17）
+## 16.1 實作現況（2026-08-24 更新）
+
+> 計數類數字（來源數、規則數、端點數、頁數）以 README 為準——那裡有
+> `tests/test_readme_consistency.py` 對照設定檔自動檢查，本節則否。
 
 | 層 | 狀態 | 已驗證的事實 |
 |---|---|---|
-| 擷取層 | ✅ 16 個來源可運作 | CelesTrak CSSI、GFZ nowcast、SWPC（X 射線／閃焰事件／積分質子／RTSW 磁場／RTSW 太陽風／估計 Kp／太陽活動區／3 日預報／27 日展望／D-RAP）、Kyoto Dst、NASA OMNI2、GFZ Hp30、SWPC OVATION |
+| 擷取層 | ✅ 22 個來源、19 個可運作 | CelesTrak CSSI、GFZ nowcast、SWPC（X 射線／閃焰事件／積分質子／RTSW 磁場／RTSW 太陽風／估計 Kp／太陽活動區／3 日預報／27 日展望／D-RAP）、Kyoto Dst、NASA OMNI2、GFZ Hp30、SWPC OVATION、中央氣象署 SWOO、福衛七號 TACC ×2；另 3 個（在地 GNSS TEC/ROTI/S4、磁力計、電離層探測）為 planned，待外部協調 |
 | 資料層 | ✅ | 雙時間軸查詢、變更偵測（重抓整份檔案只寫入實際變動的列）、品質三級制、cadence 感知分區 |
 | 模型層 | ✅ 熱氣層＋地磁基準場；◐ 電離層（D 層吸收已接）；⛔ 區域地磁擾動（待在地實測） | 2024-05 Gannon 400 km storm_ratio 2.56×（暴時 ap 模式）；IGRF-14 臺灣 F≈45,007 nT／I≈35.1°，與實測相符 |
-| 預報層 | ✅ 1–48h Kp 預報 | 滾動起報回測；3–24h 勝基線 2–8%，48h 氣候平均勝出（Tier 0 門檻擋下）；訓練資料來自 OMNI2（275k 列） |
-| 風險層 | ✅ 3 網域 15 條規則 | Gannon 事件正確產生 L4（Kp 9.0、Ap 271）；駐留與遲滯行為有測試涵蓋 |
-| 產品層 | ✅ | CSSI 匯出對 CelesTrak 實檔**2,279 行完全一致**（含區段配置）；密度修正因子表 |
-| 展示層 | ✅ API＋儀表板 | 11 個 API 端點；Streamlit 8 頁，全數以 AppTest 驗證無例外 |
+| 預報層 | ✅ Kp 3–48h＋**Hp30 1／3／6h**（1 小時產品建在 30 分鐘格點上） | 滾動起報回測；Kp 3–24h 勝基線 2–8%，48h 氣候平均勝出（Tier 0 門檻擋下）；Hp30 1h 為唯一 BSS 明顯為正者（0.475）；四項 KPI（命中率／誤警率／**提前量**／可信度）皆已可算 |
+| 風險層 | ✅ 3 網域 19 條規則（另 3 個已宣告網域尚無規則，於 nowcast 標為「尚無判據」） | Gannon 事件正確產生 L4（Kp 9.0、Ap 271）；駐留與遲滯行為有測試涵蓋 |
+| 產品層 | ✅ | CSSI 匯出對 CelesTrak 實檔**2,278/2,279 行一致**（唯一差異為當日仍在更新的觀測列；排除當日後 2,054/2,054 完全一致，含區段配置）；密度修正因子表 |
+| 展示層 | ✅ API＋儀表板 | 14 個 API 端點（含 `/v1/forecast`，預報值與該 horizon 的實測技巧同列）；Streamlit 14 頁，全數以 AppTest 驗證無例外 |
 
 **已實測的關鍵數字**：
 
-- CSSI 格式讀寫可逆性：2,279/2,279 行 byte-identical（含 OBSERVED 2054、DAILY_PREDICTED 45、MONTHLY_PREDICTED 180 三段配置）
+- CSSI 格式讀寫可逆性：2,278/2,279 行 byte-identical（含 OBSERVED 2054、DAILY_PREDICTED 45、MONTHLY_PREDICTED 180 三段配置）。唯一不一致者為快照當日的觀測列——來源在快照後又修訂了該日 Kp，非格式缺陷；排除當日更新列後為 2,054/2,054。以 `tools/cssi_compare.py` 可複核
 - 2024-05-11 Gannon 峰值：Kp 9.0、Ap 271，事件卡判為 L4／G4
 - 400 km 熱氣層密度：4.6e-12 → 1.09e-11 kg/m³（storm_ratio 2.56×，暴時 ap 模式）
 - 密度修正倍率峰值：300–400 km 2.24×／400–500 km 2.90×／500–600 km 3.67×

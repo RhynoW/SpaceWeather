@@ -434,8 +434,12 @@ class RiskEngine:
         start = now - timedelta(hours=lookback_h)
         episodes, status = self.evaluate(start=start, end=now, as_of=as_of)
 
+        # 已宣告於 params.yaml `impact_domains`、但 configs/rules 尚無任何規則的
+        # 網域也必須列出來。少一列與「L0 綠燈」在畫面上難以分辨，讀者會把
+        # 「還沒有判據」當成「查過沒事」——這與 P5「沒資料 ≠ 沒事」是同一條原則，
+        # 只是缺口落在規則層而非資料層。此類網域的 criteria_total 為 0。
         rows = []
-        for domain in sorted({r.domain for r in self.rules}):
+        for domain in sorted({r.domain for r in self.rules} | set(self.registry.impact_domains)):
             dom_eps = [e for e in episodes if e.domain == domain and e.end >= now - timedelta(hours=3)]
             dom_status = status[status["domain"] == domain]
             has_data = (dom_status["status"] == "ok").any()
@@ -455,7 +459,8 @@ class RiskEngine:
                     "active_rules": ",".join(sorted({e.rule_id for e in dom_eps})) or "—",
                     "criteria_total": int(len(dom_status)),
                     "criteria_ok": int(len(dom_status) - len(unevaluated)),
-                    "fully_evaluated": bool(not unevaluated),
+                    # 判據數為 0 時不算「已完整評估」——沒有規則不等於全部通過
+                    "fully_evaluated": bool(len(dom_status) and not unevaluated),
                     "unevaluated_rules": ",".join(unevaluated),
                     # 網域層級的依據：無資料 → unavailable；全部推估 → proxy；
                     # 其餘取最弱的一項（proxy > modelled > observed），不回 null。
