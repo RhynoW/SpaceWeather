@@ -30,6 +30,9 @@ class Baseline:
 
     name = "baseline"
     tier = 0
+    #: 事件門檻。目標可換（Kp／Hp30），門檻必須跟著換，否則模型學的標籤
+    #: 與擂台計分的標籤不是同一個定義——這種錯不會報錯，只會讓分數失真。
+    storm_threshold: float = STORM_THRESHOLD
 
     def fit(self, X: pd.DataFrame, y: pd.Series) -> "Baseline":
         return self
@@ -38,11 +41,11 @@ class Baseline:
         raise NotImplementedError
 
     def predict_proba_storm(self, X: pd.DataFrame) -> np.ndarray:
-        """回傳 P(Kp ≥ 5)。基線用經驗分布近似。"""
+        """回傳 P(目標 ≥ 門檻)。基線用經驗分布近似。"""
         pred = self.predict(X)
         # 以預測值與門檻的距離做 logistic 轉換；斜率由訓練殘差尺度決定
         scale = getattr(self, "_resid_scale", 1.0)
-        return 1.0 / (1.0 + np.exp(-(pred - STORM_THRESHOLD) / max(scale, 1e-6)))
+        return 1.0 / (1.0 + np.exp(-(pred - self.storm_threshold) / max(scale, 1e-6)))
 
 
 class PersistenceBaseline(Baseline):
@@ -94,10 +97,24 @@ class RecurrenceBaseline(Baseline):
         self._resid_scale = float(np.nanstd(y.to_numpy()[ok] - pred[ok])) or 1.0
         return self
 
+    @staticmethod
+    def _recur_col(X: pd.DataFrame) -> str | None:
+        """復現特徵的欄名隨目標而變（kp_recur27d／hp30_recur27d）。
+
+        寫死欄名的後果不是報錯而是**靜默棄權**：欄位不存在 → 預測全為 NaN
+        → 擂台把這個模型整個丟掉 → 成績表上少一列基線，讀者不會發現
+        ML 模型少贏了一個對手。
+        """
+        for c in X.columns:
+            if c.endswith("_recur27d"):
+                return c
+        return None
+
     def predict(self, X: pd.DataFrame) -> np.ndarray:
-        if "kp_recur27d" not in X.columns:
+        col = self._recur_col(X)
+        if col is None:
             return np.full(len(X), np.nan)
-        v = X["kp_recur27d"].to_numpy(dtype=float)
+        v = X[col].to_numpy(dtype=float)
         return np.where(np.isfinite(v), v, getattr(self, "_fallback", 2.0))
 
 
@@ -116,6 +133,7 @@ class GbmForecaster:
     learning_rate: float = 0.06
     max_depth: int | None = 6
     random_state: int = 42
+    storm_threshold: float = STORM_THRESHOLD
     _reg: object = field(default=None, repr=False)
     _clf: object = field(default=None, repr=False)
     _columns: list[str] = field(default_factory=list, repr=False)
@@ -137,7 +155,7 @@ class GbmForecaster:
         )
         self._reg = HistGradientBoostingRegressor(**common).fit(X, y)
 
-        storm = (y >= STORM_THRESHOLD).astype(int)
+        storm = (y >= self.storm_threshold).astype(int)
         # 事件極不平衡（Kp≥5 約佔 3%）；類別數不足時退回只做回歸。
         #
         # 刻意**不用** class_weight="balanced"：它會把少數類的機率整體膨脹，
@@ -153,7 +171,7 @@ class GbmForecaster:
     def predict_proba_storm(self, X: pd.DataFrame) -> np.ndarray:
         if self._clf is None:
             pred = self.predict(X)
-            return 1.0 / (1.0 + np.exp(-(pred - STORM_THRESHOLD)))
+            return 1.0 / (1.0 + np.exp(-(pred - self.storm_threshold)))
         return np.asarray(self._clf.predict_proba(X[self._columns])[:, 1], dtype=float)
 
     def feature_importance(self, X: pd.DataFrame, y: pd.Series, n_repeats: int = 5):
@@ -171,11 +189,14 @@ class GbmForecaster:
         )
 
 
-def default_models() -> list:
+def default_models(storm_threshold: float = STORM_THRESHOLD) -> list:
     """回傳預設模型組合（基線在前，便於報表排序）。"""
-    return [
+    models = [
         PersistenceBaseline(),
         ClimatologyBaseline(),
         RecurrenceBaseline(),
-        GbmForecaster(),
+        GbmForecaster(storm_threshold=storm_threshold),
     ]
+    for m in models[:3]:
+        m.storm_threshold = storm_threshold
+    return models

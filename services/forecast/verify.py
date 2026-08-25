@@ -198,6 +198,80 @@ def pick_threshold(y_event: np.ndarray, prob: np.ndarray,
     return max(rows, key=lambda r: key(r[1]) if np.isfinite(key(r[1])) else -1)[0]
 
 
+@dataclass
+class EpisodeSkill:
+    """事件段層級的成績：命中幾場、平均提前多久發出。"""
+
+    n_episodes: int
+    n_detected: int
+    leads_h: list[float]
+
+    @property
+    def recall(self) -> float:
+        return self.n_detected / self.n_episodes if self.n_episodes else float("nan")
+
+
+def storm_episodes(times: pd.DatetimeIndex, event: np.ndarray,
+                   merge_gap_h: float) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
+    """把逐點的事件旗標併成事件段，間隔小於 merge_gap_h 者視為同一場。
+
+    不併段的話，一場地磁暴中間掉到門檻以下一格就被算成兩場，
+    事件數會被稀釋，提前量也會被「第二段的重新命中」灌水。
+    """
+    idx = np.flatnonzero(np.asarray(event).astype(bool))
+    if idx.size == 0:
+        return []
+    gap = pd.Timedelta(hours=merge_gap_h)
+    spans: list[list[pd.Timestamp]] = [[times[idx[0]], times[idx[0]]]]
+    for i in idx[1:]:
+        t = times[i]
+        if t - spans[-1][1] <= gap:
+            spans[-1][1] = t
+        else:
+            spans.append([t, t])
+    return [(a, b) for a, b in spans]
+
+
+def episode_lead_time(
+    issue_times: pd.DatetimeIndex,
+    y_event: np.ndarray,
+    pred_event: np.ndarray,
+    horizon_h: float,
+    *,
+    merge_gap_h: float = 3.0,
+) -> EpisodeSkill:
+    """事件段命中率與**提前量**（構想書明列的 KPI）。
+
+    定義（不寫清楚的提前量無法複核）：
+
+      起報時刻 t 的一筆預報，說的是 `t + horizon` 那一刻。因此對一場起始於
+      T0 的事件，**最早**那筆目標時刻落在事件段內的告警，其起報時刻 t 就是
+      使用者實際拿到警訊的時間，提前量 = T0 − t = horizon −（該筆目標時刻 − T0）。
+
+    所以提前量**上限就是 horizon**，且只在告警正好指向事件起始那一刻時取到。
+    目標時刻落在 T0 之前的告警不算：它在逐點列聯表裡已計為誤報，
+    若又拿來充當提前量，等於用誤報換取好看的 KPI。
+
+    未被任何告警命中的事件段計入 n_episodes 但不貢獻提前量——
+    只報「命中者的平均提前量」而不報命中率，是這個指標最常見的誤用。
+    """
+    y_event = np.asarray(y_event).astype(bool)
+    pred_event = np.asarray(pred_event).astype(bool)
+    valid_times = issue_times + pd.Timedelta(hours=horizon_h)
+
+    episodes = storm_episodes(valid_times, y_event, merge_gap_h)
+    leads: list[float] = []
+    detected = 0
+    for t0, t1 in episodes:
+        inside = pred_event & (valid_times >= t0) & (valid_times <= t1)
+        if not inside.any():
+            continue
+        detected += 1
+        first_valid = valid_times[np.flatnonzero(inside)[0]]
+        leads.append(horizon_h - (first_valid - t0).total_seconds() / 3600.0)
+    return EpisodeSkill(n_episodes=len(episodes), n_detected=detected, leads_h=leads)
+
+
 def evaluate(
     models: list,
     X: pd.DataFrame,
@@ -208,9 +282,14 @@ def evaluate(
     gap_days: int = 7,
     prob_threshold: float | None = None,
     objective: str = "csi",
+    storm_threshold: float = STORM_THRESHOLD,
+    horizon_h: float | None = None,
+    merge_gap_h: float = 3.0,
 ) -> pd.DataFrame:
-    """同一擂台評估所有模型，回傳每個模型一列的成績表。"""
-    y_event = (y >= STORM_THRESHOLD).astype(int)
+    """同一擂台評估所有模型，回傳每個模型一列的成績表。
+
+    給 `horizon_h` 時額外計算事件段命中率與提前量；不給則只有逐點指標。
+    """
     results: dict[str, dict[str, list]] = {}
 
     for train_mask, test_mask in rolling_origin_splits(
@@ -229,7 +308,7 @@ def evaluate(
                 if prob_threshold is None:
                     prob_tr = np.asarray(fitted.predict_proba_storm(Xtr), dtype=float)
                     ok_tr = np.isfinite(prob_tr)
-                    ev_tr = (ytr.to_numpy()[ok_tr] >= STORM_THRESHOLD).astype(int)
+                    ev_tr = (ytr.to_numpy()[ok_tr] >= storm_threshold).astype(int)
                     thr = pick_threshold(ev_tr, prob_tr[ok_tr], objective=objective)
                     pod_tr = contingency(ev_tr, prob_tr[ok_tr] >= thr).pod
                 else:
@@ -247,7 +326,7 @@ def evaluate(
             bucket.setdefault("abs_err", []).extend(np.abs(pred[ok] - truth).tolist())
             bucket.setdefault("sq_err", []).extend(((pred[ok] - truth) ** 2).tolist())
             bucket.setdefault("y_event", []).extend(
-                (truth >= STORM_THRESHOLD).astype(int).tolist()
+                (truth >= storm_threshold).astype(int).tolist()
             )
             bucket.setdefault("prob", []).extend(prob[ok].tolist())
             bucket.setdefault("pred_event", []).extend(
@@ -257,11 +336,27 @@ def evaluate(
             bucket.setdefault("pod_train", []).append(pod_tr)
             bucket.setdefault("tier", []).append(getattr(model, "tier", 9))
 
+            if horizon_h is not None:
+                # 逐折計算：折與折之間有 gap，跨折併段會把不存在的事件接起來
+                ep = episode_lead_time(
+                    yte.index[ok], (truth >= storm_threshold).astype(int),
+                    (prob[ok] >= thr).astype(int), horizon_h, merge_gap_h=merge_gap_h,
+                )
+                bucket.setdefault("ep_total", []).append(ep.n_episodes)
+                bucket.setdefault("ep_hit", []).append(ep.n_detected)
+                bucket.setdefault("leads", []).extend(ep.leads_h)
+
     rows = []
+    # 一次都沒進到 results 的模型代表它在每一折都算不出有限值（多半是特徵欄位
+    # 對不上）。這種情況必須留在表上——安靜消失的對手，等於讓 ML 模型不戰而勝。
+    for model in models:
+        results.setdefault(model.name, {})
     for name, b in results.items():
         if "abs_err" not in b:
-            rows.append({"model": name, "status": "failed",
-                         "note": (b.get("errors") or ["unknown"])[0][:80]})
+            note = (b.get("errors") or ["每折預測皆非有限值（特徵欄位對不上？）"])[0][:80]
+            rows.append({"model": name,
+                         "status": "failed" if b.get("errors") else "skipped",
+                         "note": note})
             continue
         abs_err = np.array(b["abs_err"])
         ct = contingency(np.array(b["y_event"]), np.array(b["pred_event"]))
@@ -283,6 +378,18 @@ def evaluate(
                 "status": "ok",
             }
         )
+        if horizon_h is not None:
+            total, hit = sum(b.get("ep_total", [])), sum(b.get("ep_hit", []))
+            leads = np.array(b.get("leads", []), dtype=float)
+            rows[-1].update({
+                "episodes": int(total),
+                "ep_recall": round(hit / total, 3) if total else float("nan"),
+                # 提前量只在命中的事件段上有定義；n 一併報出，否則
+                # 「命中 1 場、提前 6 小時」會被讀成穩定表現
+                "lead_h_med": round(float(np.median(leads)), 2) if leads.size else float("nan"),
+                "lead_h_mean": round(float(np.mean(leads)), 2) if leads.size else float("nan"),
+                "lead_n": int(leads.size),
+            })
 
     df = pd.DataFrame(rows)
     if df.empty or "MAE" not in df.columns:
