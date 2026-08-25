@@ -408,6 +408,17 @@ params:
     scale: G
     impacts: [ORBIT_PREDICTION, GNSS_PNT, HF_COMM]
     status: ready
+  - code: HP30_STORM_PROB
+    name_zh: 地磁暴機率 P(Hp30≥5)
+    name_en: Probability of Hp30 >= 5
+    unit: "1"
+    domain: geomag
+    valid_min: 0.0
+    valid_max: 1.0
+    cadence_s: 1800
+    scale: G
+    impacts: [ORBIT_PREDICTION, GNSS_PNT, HF_COMM]
+    status: ready
 
   # ── 電離層吸收（SWPC D-RAP，現成可用，非需外部協調）──────────────────
   - code: DRAP_MAX_MHZ
