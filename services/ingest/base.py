@@ -129,17 +129,31 @@ class Connector(ABC):
             + ("（且無 local_fallback）" if not local else f"（local_fallback 不存在：{local}）")
         )
 
+    def latest_raw(self) -> Path | None:
+        """本來源最新一份原始落地檔。找不到時回 None。"""
+        root = self.store.raw_root / self.spec.source_id
+        if not root.exists():
+            return None
+        files = sorted(root.rglob(f"*.{self.raw_ext.lstrip('.')}"))
+        return files[-1] if files else None
+
     def run(
         self,
         *,
         ingest_time: datetime | None = None,
         dedupe: bool = True,
         backfill: bool = False,
+        reparse: bool = False,
     ) -> FetchOutcome:
         """完整擷取流程：抓取 → 原始落地 → 解析 → 品質標記 → 寫入。
 
         backfill=True 時，每列的 ingest_time 改推算為
         `valid_time + publication_lag_s`，而不是「現在」。
+
+        reparse=True 時不向外抓取，改解析最新一份原始落地檔。原始落地的用意
+        本來就是「解析錯誤可重跑，不需重抓」，但在此之前沒有任何入口能做到
+        這件事——解析規則改了（例如放寬 window_days 以回填歷史）只能重新下載
+        整份檔案。此模式讓那句話成立，也讓回填不必再打擾來源站台。
 
         為什麼需要這個模式：回填的歷史資料若一律標成今天入庫，as_of 回放到
         2024 年會查不到任何東西——這在語意上是對的（我們當年確實沒有這筆資料），
@@ -149,11 +163,19 @@ class Connector(ABC):
         started = datetime.now(timezone.utc)
         outcome = FetchOutcome(source_id=self.spec.source_id, ok=False, started_at=started)
         try:
-            payload, mode = self.fetch_bytes()
+            if reparse:
+                raw_path = self.latest_raw()
+                if raw_path is None:
+                    raise RuntimeError(
+                        f"{self.spec.source_id} 沒有原始落地檔可重新解析"
+                        f"（{self.store.raw_root / self.spec.source_id}）"
+                    )
+                payload, mode = raw_path.read_bytes(), f"reparse:{raw_path.name}"
+            else:
+                payload, mode = self.fetch_bytes()
+                raw_path = self.store.raw_path(self.spec.source_id, started, self.raw_ext)
+                raw_path.write_bytes(payload)
             outcome.mode = mode
-
-            raw_path = self.store.raw_path(self.spec.source_id, started, self.raw_ext)
-            raw_path.write_bytes(payload)
             outcome.raw_path = raw_path
 
             df = self.parse(payload)

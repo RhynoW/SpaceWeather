@@ -127,6 +127,18 @@ class SwxStore:
         if rows_in == 0:
             return WriteResult(sid, 0, 0, 0, [])
 
+        # 未註冊參數不得入庫（架構書 §6.3）。少了這道檢查，拼錯的參數代碼
+        # 會安靜地長出一個新分區——寫入回報成功、查詢查不到、UI 少一條線，
+        # 沒有任何一處會報錯。曾真的發生：預報端以 f"{code}_STORM_PROB" 拼出
+        # KP_3H_STORM_PROB（正確為 KP_STORM_PROB），機率序列因此整批寫錯地方。
+        unknown = sorted({str(c) for c in obs["param_code"].unique()
+                          if str(c) not in registry()})
+        if unknown:
+            raise ValueError(
+                f"未註冊的參數代碼：{unknown}；"
+                "請先在 configs/params.yaml 註冊，或修正拼寫"
+            )
+
         stamp = (ingest_time or datetime.now(timezone.utc)).strftime("%Y%m%dT%H%M%S%fZ")
 
         if dedupe:
@@ -150,7 +162,12 @@ class SwxStore:
         return WriteResult(sid, rows_in, len(obs), skipped, files)
 
     def _drop_unchanged(self, obs: pd.DataFrame) -> pd.DataFrame:
-        """變更偵測：與既有最新值相同者不重複寫入。"""
+        """變更偵測：與既有最新值相同者不重複寫入。
+
+        比對 value、quality_flag 與 confidence 三者。三個都是交付欄位，
+        任一改變都必須落庫——只比 value 的話，品質標記或可信度的修正會被
+        當成「沒變」而靜默丟棄。
+        """
         codes = sorted(set(obs["param_code"].dropna().astype(str)))
         globs = self.globs(codes)
         if not globs:
@@ -160,7 +177,8 @@ class SwxStore:
         hi = obs["valid_time"].max().to_pydatetime()
         sql = f"""
             SELECT DISTINCT ON (param_code, source_id, valid_time, revision)
-                   param_code, source_id, valid_time, revision, value, quality_flag
+                   param_code, source_id, valid_time, revision, value, quality_flag,
+                   confidence
             FROM read_parquet({globs!r}, union_by_name=true)
             WHERE valid_time BETWEEN ? AND ?
             ORDER BY param_code, source_id, valid_time, revision, ingest_time DESC
@@ -172,7 +190,8 @@ class SwxStore:
 
         existing["valid_time"] = pd.to_datetime(existing["valid_time"], utc=True)
         merged = obs.merge(
-            existing.rename(columns={"value": "_old_value", "quality_flag": "_old_flag"}),
+            existing.rename(columns={"value": "_old_value", "quality_flag": "_old_flag",
+                                     "confidence": "_old_conf"}),
             on=["param_code", "source_id", "valid_time", "revision"],
             how="left",
         )
@@ -180,7 +199,13 @@ class SwxStore:
             (merged["value"] - merged["_old_value"]).abs() <= _VALUE_EPS
         ) | (merged["value"].isna() & merged["_old_value"].isna())
         same_flag = merged["quality_flag"] == merged["_old_flag"]
-        unchanged = (same_value & same_flag).fillna(False).to_numpy()
+        # confidence 也要比。它是交付欄位（構想書四項 KPI 之一），值沒變但
+        # 可信度算法修正時，若不比對就永遠寫不進去——修好了程式，庫裡仍是舊值，
+        # 而且沒有任何錯誤訊息。此情況真的發生過（預報 confidence 曾恆為 1.6）。
+        same_conf = (
+            (merged["confidence"] - merged["_old_conf"]).abs() <= _VALUE_EPS
+        ) | (merged["confidence"].isna() & merged["_old_conf"].isna())
+        unchanged = (same_value & same_flag & same_conf).fillna(False).to_numpy()
         return obs.loc[~unchanged].reset_index(drop=True)
 
     # ── 讀取 ────────────────────────────────────────────────────────────
