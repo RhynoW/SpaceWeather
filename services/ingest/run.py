@@ -5,6 +5,8 @@
   python -m services.ingest.run --source all           跑所有 ready 的來源
   python -m services.ingest.run --source celestrak_sw_all
   python -m services.ingest.run --source all --offline 只用 local_fallback（封閉網路演練）
+  python -m services.ingest.run --source gfz_hp30 --reparse --window-days 2100 --backfill
+                                                       重解析既有原始檔以回填歷史
 
 設計重點：**單一來源失敗不中斷整批**。每個來源各自回傳 FetchOutcome，
 最後彙整成一張表；這對「外部來源異動／中斷」的風險（架構書 §15）是必要行為。
@@ -74,7 +76,8 @@ def build(spec: SourceSpec, store: SwxStore) -> Connector:
 
 def run_source(source_id: str, store: SwxStore, *, offline: bool = False,
                ingest_time: datetime | None = None,
-               backfill: bool = False, year: int | None = None) -> FetchOutcome:
+               backfill: bool = False, year: int | None = None,
+               reparse: bool = False, window_days: float | None = None) -> FetchOutcome:
     spec = catalog()[source_id]
     if not spec.is_ready:
         return FetchOutcome(source_id, ok=False, mode="skipped",
@@ -84,7 +87,12 @@ def run_source(source_id: str, store: SwxStore, *, offline: bool = False,
         conn.year = year
     if offline:
         conn.spec = SourceSpec(**{**spec.__dict__, "endpoint": None})
-    return conn.run(ingest_time=ingest_time, backfill=backfill)
+    if window_days is not None:
+        # 例行擷取只解析近期以節省時間；回填歷史時由呼叫端放寬。
+        # 覆寫的是本次執行的複本，不動 sources.yaml。
+        raw = {**conn.spec.raw, "window_days": window_days}
+        conn.spec = SourceSpec(**{**conn.spec.__dict__, "raw": raw})
+    return conn.run(ingest_time=ingest_time, backfill=backfill, reparse=reparse)
 
 
 def run_omni_years(store: SwxStore, *, backfill: bool = True,
@@ -139,6 +147,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="OMNI2 回填年數（預設取 sources.yaml 的 years）")
     ap.add_argument("--backfill", action="store_true",
                     help="回填模式：ingest_time 依來源發布延遲推算，使 as_of 回放可用")
+    ap.add_argument("--reparse", action="store_true",
+                    help="不連外，改解析最新一份原始落地檔（解析規則改變時重跑用）")
+    ap.add_argument("--window-days", type=float, default=None,
+                    help="覆寫來源的 window_days（僅本次執行；用於回填歷史）")
     args = ap.parse_args(argv)
 
     if args.list or not args.source:
@@ -152,7 +164,8 @@ def main(argv: list[str] | None = None) -> int:
         outcomes = run_omni_years(store, backfill=args.backfill, years=args.years)
     else:
         outcomes = [run_source(args.source, store, offline=args.offline,
-                               backfill=args.backfill)]
+                               backfill=args.backfill, reparse=args.reparse,
+                               window_days=args.window_days)]
 
     for o in outcomes:
         print(o)

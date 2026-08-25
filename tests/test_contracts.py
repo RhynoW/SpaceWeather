@@ -416,3 +416,27 @@ def test_frame_sampling_is_evenly_spaced_and_keeps_both_ends():
     # 幀數少於上限時應原樣回傳
     short = [f"f{i}" for i in range(10)]
     assert sample(short, 60) == short
+
+
+def test_unregistered_param_code_is_rejected_on_write(tmp_path):
+    """未註冊參數不得入庫（架構書 §6.3）。
+
+    少了這道檢查，拼錯的參數代碼會安靜地長出一個新分區——寫入回報成功、
+    查詢查不到、UI 少一條線，沒有任何一處會報錯。真的發生過：預報端以
+    `f"{code}_STORM_PROB"` 拼出 `KP_3H_STORM_PROB`（正確為 `KP_STORM_PROB`），
+    機率序列整批寫進一個沒人會去查的地方。
+    """
+    import pandas as pd
+    import pytest
+
+    from swx_core import SwxStore, normalize
+
+    store = SwxStore(tmp_path)
+    bad = normalize(pd.DataFrame([{
+        "valid_time": pd.Timestamp("2026-01-01", tz="UTC"),
+        "param_code": "KP_3H_STORM_PROB", "value": 0.5, "unit": "1",
+        "source_id": "test", "source_tier": 1, "data_type": "FCS",
+    }]))
+    with pytest.raises(ValueError, match="未註冊"):
+        store.write(bad, source_id="test")
+    assert not (tmp_path / "swx_parquet" / "KP_3H_STORM_PROB").exists()
