@@ -79,6 +79,34 @@ def _records(df: pd.DataFrame) -> list[dict[str, Any]]:
     return out.where(pd.notna(out), None).to_dict(orient="records")
 
 
+#: 本系統預報一律附帶的作業性告誡。只寫在文件裡不夠——呼叫端讀的是 JSON。
+FORECAST_ADVISORY = {
+    "code": "RESEARCH_GRADE_FORECAST",
+    "not_for_operational_use_beyond_h": 12,
+    "message": (
+        "超過 12 小時的預報為研究階段產出，不建議用於作業決策："
+        "測試折 BSS 於 24h 起轉負，且訓練/測試折存在過擬合落差。"
+    ),
+    "reference": "docs/forecast_verification.md",
+}
+
+
+def _skill_block(skill: dict, hkey: str | None, picker) -> dict:
+    """該 horizon 的實測技巧：上線模型與它贏過的基線，一起給。
+
+    只給上線模型的分數，讀者無從判斷 0.6 的 POD 是好是壞；
+    只給差值，又看不出絕對水準。兩者並列才可判讀。
+    """
+    entry = (skill.get("horizons", {}) or {}).get(hkey) if hkey else None
+    best, baseline = picker(entry)
+    keep = ("model", "MAE", "POD", "FAR", "CSI", "BSS",
+            "episodes", "ep_recall", "lead_h_med", "lead_n")
+    return {
+        "skill": None if not best else {k: best.get(k) for k in keep},
+        "skill_baseline": None if not baseline else {k: baseline.get(k) for k in keep},
+    }
+
+
 def create_app(store: SwxStore | None = None) -> Flask:
     app = Flask(__name__)
     try:
@@ -178,16 +206,94 @@ def create_app(store: SwxStore | None = None) -> Flask:
         # 回應內含本系統預報列時，附上機器可讀的作業性告誡。
         # 只寫在文件裡不夠——呼叫端讀的是 JSON，不是 README。
         if not df.empty and (df["source_id"] == "swx_forecast").any():
-            body["advisory"] = {
-                "code": "RESEARCH_GRADE_FORECAST",
-                "not_for_operational_use_beyond_h": 12,
-                "message": (
-                    "超過 12 小時的預報為研究階段產出，不建議用於作業決策："
-                    "測試折 BSS 於 24h 起轉負，且訓練/測試折存在過擬合落差。"
-                ),
-                "reference": "docs/forecast_verification.md",
-            }
+            body["advisory"] = dict(FORECAST_ADVISORY)
         return jsonify(body)
+
+    @app.get("/v1/forecast")
+    def forecast():
+        """預報序列＋該 horizon 的實測技巧。
+
+        **技巧與預報值必須同時回傳**。只給「Kp 3.2」而不給「這個 horizon 的
+        中位提前量是 0 小時、誤警率 0.52」，呼叫端無從判斷該不該據以行動——
+        這正是構想書把命中率／誤警率／提前量／可信度四項並列為 KPI 的用意。
+
+        `horizon_h` 由 `valid_time − issued_utc` 還原，其中 `issued_utc` 取該
+        目標參數的**最新觀測時刻**（預報引擎即以此為起報錨點）。資料落後時
+        還原值會偏大，故一併回傳 `issued_basis` 讓呼叫端知道這是還原而非記錄。
+        """
+        from services.forecast.features import TARGETS
+        from services.forecast.run import forecast_confidence
+        from services.forecast.skill import (latest_forecast_batch, load_skill,
+                                             skill_models)
+
+        key = request.args.get("target", "kp")
+        if key not in TARGETS:
+            return jsonify({"error": f"未知的預報目標 {key}",
+                            "available": sorted(TARGETS)}), 404
+        spec = TARGETS[key]
+
+        now = _now()
+        # 視窗放寬到 30 天：資料落後時仍要看得到最後一批預報與它的錨點，
+        # 空回應會被誤讀成「沒有風險」而非「資料沒更新」。
+        df = store.query([spec.code, spec.prob_code],
+                         start=now - timedelta(days=30), end=now + timedelta(days=3),
+                         as_of=_ts(request.args.get("as_of")))
+        fcs = latest_forecast_batch(
+            df[df["source_id"] == "swx_forecast"] if not df.empty else df)
+        obs = df[df["data_type"].isin(OBSERVED_TYPES)] if not df.empty else df
+        latest_obs = obs.loc[obs["param_code"] == spec.code, "valid_time"].max() \
+            if not obs.empty else None
+        # 對齊到目標的格點：預報引擎以格點為起報錨點，而觀測的 valid_time
+        # 可能落在格間（例如 SWPC 估計 Kp 標在 00:05）。不對齊的話 horizon
+        # 會還原成 2.92 小時，技巧查表就查不到——差幾分鐘讓整個 KPI 消失。
+        issued = None if latest_obs is None else pd.Timestamp(latest_obs).floor(spec.grid)
+
+        prob = (fcs[fcs["param_code"] == spec.prob_code]
+                .set_index("valid_time")["value"].to_dict()) if not fcs.empty else {}
+
+        skill = load_skill().get("targets", {}).get(key, {})
+        want = request.args.get("horizon")
+
+        rows = []
+        for _, r in (fcs[fcs["param_code"] == spec.code].sort_values("valid_time")
+                     if not fcs.empty else fcs).iterrows():
+            h = None if issued is None else round(
+                (pd.Timestamp(r["valid_time"]) - pd.Timestamp(issued)).total_seconds() / 3600, 2)
+            if want and str(h) != want and str(int(h or 0)) != want:
+                continue
+            hkey = None if h is None else str(int(h)) if float(h).is_integer() else str(h)
+            rows.append({
+                "valid_time": _iso_ts(r["valid_time"]),
+                "horizon_h": h,
+                "value": None if pd.isna(r["value"]) else float(r["value"]),
+                "storm_probability": prob.get(r["valid_time"]),
+                # confidence 依 horizon 分層，非逐筆機率的函數（機率分類器過擬合，
+                # 用「這筆有多篤定」當可信度等於把過擬合當信心）
+                "confidence": None if h is None else forecast_confidence(h),
+                **_skill_block(skill, hkey, skill_models),
+            })
+
+        return jsonify({
+            "target": key,
+            "param": spec.code,
+            "grid": spec.grid,
+            "storm_threshold": spec.storm_threshold,
+            "issued_utc": _iso_ts(issued),
+            "issued_basis": f"latest_observation floored to {spec.grid}",
+            "latest_observation_utc": _iso_ts(latest_obs),
+            "data_age_s": None if latest_obs is None else round(_age_seconds(latest_obs)),
+            "count": len(rows),
+            "forecasts": rows,
+            "skill_reference": {
+                "generated_utc": skill.get("generated_utc"),
+                "command": skill.get("command"),
+                "splits": skill.get("splits"),
+                "sample_span_utc": skill.get("sample_span_utc"),
+                "note": ("skill 為滾動起報回測的實測值，非本次預報的信心；"
+                         "lead_h_med 可為負，代表事件開始後才首次命中。"),
+            },
+            "advisory": dict(FORECAST_ADVISORY),
+        })
 
     # ── 現況與事件 ──────────────────────────────────────────────────────
     @app.get("/v1/nowcast")

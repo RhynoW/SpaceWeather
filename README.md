@@ -20,6 +20,7 @@
 | [docs/architecture.md](docs/architecture.md) | 系統架構、設計原則、與構想書七大議題的對應 |
 | [docs/data_sources_c2c3.md](docs/data_sources_c2c3.md) | 地磁與電離層資料源盤查（C2/C3 風險分級之修正） |
 | [docs/forecast_verification.md](docs/forecast_verification.md) | 預報引擎驗證報告（切分明細、列聯表、未達 KPI 之落差） |
+| [docs/forecast_skill.json](docs/forecast_skill.json) | **上表的機器可讀版**——API 與儀表板的技巧數字由此取得，不手抄 |
 | [docs/density_model_validation.md](docs/density_model_validation.md) | 大氣密度模型配置、修正因子定義與驗證邊界 |
 | [docs/operations_manual.md](docs/operations_manual.md) | **值勤手冊**（燈號判讀、19 條規則處置對照、維運指令、使用邊界） |
 | [docs/glossary.md](docs/glossary.md) | **名詞說明與參數判讀**（教育推廣、值勤判讀、常見誤讀） |
@@ -95,7 +96,9 @@ pip install -r requirements.txt
 # 1. 資料源盤點與首次擷取
 python -m services.ingest.run --list                    # 先看有哪些來源
 python -m services.ingest.run --source all --backfill   # 首次：回填歷史（約 1 分鐘）
-python -m services.ingest.run --source omni2_hourly --years 6   # 預報引擎的訓練資料
+python -m services.ingest.run --source omni2_hourly --years 6
+# Hp30 例行只解析近 120 天；1 小時預報要訓練資料，需回填歷史（不重抓，改解析既有原始檔）
+python -m services.ingest.run --source gfz_hp30 --reparse --window-days 2100 --backfill   # 預報引擎的訓練資料
 
 # 2. 端到端演練：資料 → 分級 → 事件卡 → STK 檔 → 密度修正因子
 python tools/e2e_demo.py                        # 預設 2024-05 Gannon G5 事件
@@ -147,9 +150,9 @@ pip install -r requirements.lock   # 重現本文數字時使用
 | 層 | 模組 | 狀態 |
 |---|---|---|
 | 擷取層 | `services/ingest` | ✅ 22 個來源（19 個可運作）：CelesTrak、GFZ ×2、SWPC ×9、Kyoto、NASA OMNI2、**中央氣象署 SWOO**、**福衛七號 TACC ×2**（閃爍 `scn1c2`、精密定軌 `leoOrb`）。其中 15 個納入背景自動更新 |
-| 資料層 | `packages/swx_core` | ✅ 雙時間軸 Parquet + DuckDB、品質三級制、46 個註冊參數 |
+| 資料層 | `packages/swx_core` | ✅ 雙時間軸 Parquet + DuckDB、品質三級制、47 個註冊參數 |
 | 模型層 | `packages/orbit_drag`、`packages/geomag` | ✅ 熱氣層密度／阻力（MSIS 2.1，暴時 ap 模式）＋地磁基準場（IGRF-14）＋TEME↔ITRF 框架轉換（含 EOP，對 astropy 8.0.1 驗證至 0.08 m）；電離層 D 層吸收已接 |
-| 預報層 | `services/forecast` | ⚠️ **功能覆蓋** 1–48 h Kp 預報＋驗證擂台。**任何 horizon 皆非正式作業產品**；1–12 h 可作研究參考，**>12 h 為非作業性研究預報**（與 API 的 `not_for_operational_use_beyond_h: 12` 一致） |
+| 預報層 | `services/forecast` | ⚠️ **功能覆蓋** 兩組目標：Kp（3 小時格點，3–48 h）與 **Hp30（30 分鐘格點，1／3／6 h）**，後者提供構想書要求的 1 小時產品；驗證擂台含命中率、誤警率、**提前量**與可信度四項 KPI。**任何 horizon 皆非正式作業產品**；Hp30 1 h 與 Kp 3–12 h 可作研究參考，**>12 h 為非作業性研究預報**（與 API 的 `not_for_operational_use_beyond_h: 12` 一致） |
 | 風險層 | `services/risk_engine` | ✅ 3 網域 19 條規則、事件卡、作業狀態庫 |
 | 產品層 | `services/exporter` | ✅ STK/GMAT CSSI 驅動檔、密度修正因子表 |
 | 展示層 | `services/api`、`apps/dashboard` | ✅ REST API＋Streamlit 儀表板（含值勤模式、影像頁、使用指南與四語 STEM 教學頁），端點與頁面集合由契約測試守住，且每頁以 AppTest 實跑驗證可渲染 |
@@ -165,7 +168,8 @@ pip install -r requirements.lock   # 重現本文數字時使用
 | 實測密度判據 `DRAG_ENHANCEMENT` | 原型 | 由 leoOrb 精密定軌反演，彈道係數在比值中消掉；合成資料驗證可抵抗短週期混疊與單顆機動 | 門檻僅以一個 21 天窗（65 個寧靜樣本）標定，寧靜期最大值 1.98 幾乎貼著 L1 門檻 2.0；本參數為**尾隨量**（標在 t 的值描述 t−6h 到 t），不適合當暴起始指標 | `tests/test_tacc_leoorb.py` |
 | D-RAP 介接 | 已介接 | 解析與臺灣取樣 | 未與在地 HF 通聯實測校準 | `services/ingest/forecast_sources.py` |
 | L0–L4 分級 | 原型 | 駐留、遲滯、可用性行為測試 | 門檻未與需求單位校準（`calibrated: false`） | `tests/test_risk_engine.py` |
-| 48 小時預報 | 研究階段 | 4 折滾動起報回測、基線比較 | 未達 KPI；未與 NOAA 官方預報同場比較 | `docs/forecast_verification.md` |
+| Kp 預報（3–48 h） | 研究階段 | 4 折滾動起報回測、基線比較、事件段提前量 | 未達 KPI；3–12 h 中位提前量為 0；未與 NOAA 官方預報同場比較 | `docs/forecast_verification.md` |
+| Hp30 預報（1／3／6 h） | 研究階段 | 同一擂台、5 折、含提前量 | 1 h 的 BSS 0.475、FAR 0.337 為全部組合最佳，但持續性基線 POD 更高（0.729 對 0.601）；6 h 中位提前量為負，屬事後偵測 | `docs/forecast_verification.md` |
 | 事件卡生命週期 | 原型 | `draft → issued → superseded` 轉移、禁止重複發布、發布者記入稽核軌跡 | 尚未接正式人工簽核流程；API 未回傳 `reviewed_by`／`reviewed_at` | `tests/test_event_lifecycle.py` |
 | 判定依據 `inference` | 已完成 | 四值列舉、永不為 null、網域取最弱項、無資料回 `unavailable` | 觀測／模型之分類依參數清單判定，非逐筆溯源 | `tests/test_event_lifecycle.py` |
 | IGRF 基準場 | 已完成 | **值域合理性檢查**（F/D/I 落在臺灣公認範圍、磁傾角隨緯度單調遞增） | **未與任一測站實測序列逐點比對**；區域擾動仍為推估 | `tests/test_geomag.py` |
@@ -179,6 +183,13 @@ pip install -r requirements.lock   # 重現本文數字時使用
 STK 端實際介接驗證。
 
 分級規則涵蓋 `ORBIT_PREDICTION`、`HF_COMM`、`GNSS_PNT` 三個網域，共 19 條。
+
+構想書要求的影響矩陣還包含 VHF/UHF 與 S/X/Ka（SATCOM）、衛星操作。
+這三個網域已宣告於 `configs/params.yaml` 的 `impact_domains`，
+**但尚無任何分級規則**——它們仍會出現在 `/v1/nowcast` 與儀表板上，
+標為 `尚無判據`（`criteria_total = 0`），而不是從表上消失。
+理由與參數層級相同：畫面上少一列與綠燈難以分辨，讀者會把「還沒訂門檻」
+讀成「查過沒事」。此行為由 `tests/test_risk_engine.py` 驗證。
 
 **三個網域現在都有實測判據**，但成熟度不同：
 
@@ -214,7 +225,7 @@ packages/
   SOURCE_MAP.md          移入模組的來源與改動記錄
 services/
   ingest/                各來源介接器（設定驅動）
-  forecast/              1–48 小時預報引擎與驗證擂台
+  forecast/              短時預報引擎與驗證擂台（Kp 3–48 h／Hp30 1–6 h）
   risk_engine/           分級規則引擎與事件卡
   exporter/              STK CSSI 檔、密度修正因子
   api/                   Flask REST API
@@ -312,6 +323,32 @@ $ python tools/whatif_threshold.py --rule ORB-L3-KP6 --param KP_3H --sweep 5,6,7
 | 24h | gbm | 1.051 | 1.037–1.066 | climatology | 1.070 | +1.8% |
 | **48h** | **climatology** | **1.068** | 1.054–1.084 | — | — | **ML 未勝出** |
 
+**構想書要求的 1 小時產品另建在 Hp30 上**（Kp 是 3 小時指數，
+以它為目標時 1 小時 horizon 只是把同一個值換個說法）。同一座擂台、5 折滾動起報，
+樣本 98,639 筆（30 分鐘格點，2020-11 起）：
+
+| horizon | 最佳模型 | MAE | 基線 MAE | POD | FAR | BSS | 事件段命中率 | 中位提前量 |
+|---|---|---|---|---|---|---|---|---|
+| **1h** | **gbm** | **0.495** | persistence 0.530 | 0.601 | **0.337** | **0.475** | 0.492 | **1.0 h** |
+| 3h | gbm | 0.733 | persistence 0.760 | 0.236 | 0.484 | 0.196 | 0.182 | 0.0 h |
+| 6h | gbm | 0.882 | persistence 0.924 | 0.095 | 0.591 | 0.067 | 0.094 | **−0.75 h** |
+
+**1 小時是目前唯一接近可用的產品**，但**不是全面勝出**——持續性基線的
+POD 更高（0.729 對 0.601），gbm 贏在 MAE、FAR 與機率品質。要少漏報選持續性，
+要少誤報選 gbm，這個取捨屬需求單位的決定。
+6 小時的中位提前量為**負**，代表多半在事件開始後才第一次命中，是延遲偵測而非預報。
+
+**提前量的定義**（構想書明列的 KPI，也是最容易各說各話的一項）：
+
+以**事件段**計——起報時刻 t 的預報說的是 t+horizon，故
+
+    提前量 = 事件起始 − 首次命中的起報時刻 = horizon −（首次命中的目標時刻 − 事件起始）
+
+上限即 horizon；**可以是負的**（事後偵測），報表照實呈現不截斷；
+目標時刻落在事件起始之前的告警不計入（它已算誤報）。
+未命中的事件段仍計入分母。因此**提前量必須與事件段命中率一起讀**：
+漏掉九成、剩一成準時命中，也能得到漂亮的提前量。
+
 **事件型指標的定義**（不附定義的 POD/FAR 無法複核）：
 
 - 事件：**Kp ≥ 5**（G1 以上），基率約 3%
@@ -380,6 +417,20 @@ NOAA 的 24 小時機率預報亦僅達約 50% 水準。
 該項 KPI 宜與需求單位就**事件定義、時間容差窗與比較基準**重新協商，
 而非僅調整數值目標。文獻對照與建議的強化順序見
 [docs/research_review.md](docs/research_review.md)。
+
+### 技巧與預報值一起交付
+
+預報值單獨旅行是這套系統最容易造成誤用的形式。因此驗證擂台的成績寫成
+機器可讀的 [docs/forecast_skill.json](docs/forecast_skill.json)，
+`GET /v1/forecast` 與儀表板都由它取數字，**不手抄**：
+
+- 每一列預報都附該 horizon 的實測 POD／FAR／BSS／事件段命中率／中位提前量，
+  以及它**贏過的最佳基線**——只給上線模型的分數，讀者會誤以為它全面較優。
+- 成績檔缺席時回 `null` 而非 0。0 會被讀成「命中率 0」，`null` 才是「沒有量過」。
+- 成績檔放在 `docs/` 而非 `data/exports/`：它是**宣稱的證據**，
+  必須與引用它的報告同進版控；`data/` 不進版控，雲端部署就讀不到。
+
+重跑：`python -m services.forecast.run --verify --target <kp|hp30> --write-summary`。
 
 ### 密度修正因子（摘要）
 
@@ -585,7 +636,7 @@ python tools/make_source_list.py     # → docs/SpaceWeather資料來源清單YY
 |---|---|---|
 | CelesTrak CSSI SW-All | F10.7、Kp、ap、Ap、ISN、Cp、C9 | ✅ 2021→2041（含月預測） |
 | GFZ Kp nowcast | Kp、ap、F10.7、SN | ✅ 備援兼近即時 |
-| GFZ Hp30／ap30 | 30 分鐘地磁指數 | ✅ 提升暴起始時刻解析度 |
+| GFZ Hp30／ap30 | 30 分鐘地磁指數 | ✅ 提升暴起始時刻解析度；**1 小時預報的目標變數**（例行只解析近 120 天，訓練用歷史以 `--reparse --window-days` 回填） |
 | SWPC GOES X-ray | 0.05–0.4 / 0.1–0.8 nm 通量 | ✅ |
 | SWPC GOES 閃焰事件 | 閃焰起訖時間與 A–X 分級 | ✅ |
 | SWPC GOES 積分質子 | ≥10 MeV | ✅ |
@@ -627,12 +678,12 @@ python tools/make_source_list.py     # → docs/SpaceWeather資料來源清單YY
 
 | 頁面 | 網址代稱 | 用途 |
 |---|---|---|
-| **值勤模式** | `duty` | **一屏掌握全局**：三網域燈號＋最近事件卡＋資料齡期＋關鍵指標判讀 |
+| **值勤模式** | `duty` | **一屏掌握全局**：各網域燈號＋最近事件卡＋資料齡期＋關鍵指標判讀 |
 | 太空環境總覽 | `overview` | 各網域紅綠燈、關鍵指標趨勢、資料齡期 |
 | 參數時序 | `series` | 任意參數繪圖，可填 as_of 進入回放模式 |
 | 事件卡 | `events` | 事件卡全文與 SDA 介接 JSON、規則可用性 |
 | 太陽閃焰 | `flares` | 閃焰事件表、X 射線時序、D 層吸收 |
-| 48 小時預報 | `forecast` | 本系統預報 vs NOAA 官方預報 vs 觀測 |
+| 短時預報 | `forecast` | 兩組目標（Hp30 1／3／6 h、Kp 3–48 h）；預報值與該 horizon 的實測技巧（POD／FAR／提前量／可信度）並列 |
 | 地磁基準場 | `geomag` | IGRF 參考場、測站表、ΔH 推估、Hp30 解析度對比 |
 | 軌道與密度修正 | `density` | 密度修正倍率、STK 驅動檔下載 |
 | 資料健康 | `health` | 各通道齡期、品質旗標分布、資料源盤點 |
@@ -696,6 +747,9 @@ python -m services.forecast.run --verify                    # 全 horizon 驗證
 # 以 POD 目標挑操作點，並同時輸出訓練／測試落差（達標與否由輸出為準）
 python -m services.forecast.run --verify --objective pod
 python -m services.forecast.run --predict --write           # 產生預報並寫入
+python -m services.forecast.run --verify --target hp30      # 1／3／6 h（30 分鐘格點）
+python -m services.forecast.run --verify --write-summary    # 成績寫入 docs/forecast_skill.json
+python -m services.forecast.run --predict --target hp30     # 構想書要求的 1 小時產品
 
 # 匯出
 python -m services.exporter.stk_spaceweather --out out/SpaceWeather-All-v1.2.txt
@@ -723,7 +777,7 @@ python tools/media_smoke.py --all            # 設定檔內全部 22 項
 
 ## API
 
-13 個端點，唯讀為主、無狀態、可快取。
+14 個端點，唯讀為主、無狀態、可快取。
 端點集合由 `tests/test_api_contract.py` 守住——新增端點而未同步本節，測試會紅燈。
 
 **回應語意**（以下為目前實際行為，非規劃）：
@@ -765,6 +819,45 @@ S4 有了、ROTI 仍無來源，故為 `partial`——規則會在 S4 超標時�
 
 這三者是「沒事」／「部分可判」／「沒資料」的區分機制。
 
+`GET /v1/forecast` 的每一列都把**預報值與該 horizon 的實測技巧綁在一起**：
+
+```json
+{
+  "target": "hp30",
+  "issued_utc": "2026-08-17T23:00:00Z",
+  "issued_basis": "latest_observation floored to 30min",
+  "forecasts": [
+    {
+      "valid_time": "2026-08-18T00:00:00Z",
+      "horizon_h": 1.0,
+      "value": 1.58,
+      "storm_probability": 0.006,
+      "confidence": 0.6,
+      "skill":          {"model": "gbm",         "POD": 0.601, "FAR": 0.337,
+                         "BSS": 0.475, "ep_recall": 0.492, "lead_h_med": 1.0},
+      "skill_baseline": {"model": "persistence", "POD": 0.729, "FAR": 0.444,
+                         "BSS": 0.444, "ep_recall": 0.475, "lead_h_med": 1.0}
+    }
+  ]
+}
+```
+
+**`skill_baseline` 不是裝飾**：此例中上線模型的誤警率較低、機率品質較好，
+但**基線的命中率更高**。只回傳上線模型的分數，呼叫端會誤以為它全面較優。
+
+`horizon_h` 由 `valid_time − issued_utc` 還原，`issued_utc` 取該目標參數的最新
+觀測時刻並**對齊到目標格點**——觀測可能標在格間（SWPC 估計 Kp 標在 00:05），
+不對齊會讓 horizon 還原成 2.92 小時，技巧查表就查不到。
+
+預報引擎的起報錨點也定為**目標變數最後一筆觀測**（對齊格點），兩邊因此一致。
+不這樣做會有兩個後果：面板最後一格常是「有太陽風、沒有目標值」的狀態，
+從那裡起報等於宣稱有一筆不存在的觀測；而且 API 還原的 horizon 會對不上
+——實測時出現過 1 小時預報被還原成 15.5 小時。
+
+回應只含**最近一次起報**的那批預報（以 `ingest_time` 取最新批次）。
+資料層會累積每一次 `--predict --write` 的結果，不過濾就會把上週錨點的
+6 小時預報與今天的 1 小時預報混在同一張表上。
+
 回應含本系統預報（`source_id: swx_forecast`）時，另帶 `advisory`：
 
 ```json
@@ -798,6 +891,7 @@ S4 有了、ROTI 仍無來源，故為 `partial`——規則會在 S4 超標時�
 | `GET /v1/health/data` | 各通道資料齡期與品質 |
 | `GET /v1/obs?param=&from=&to=&as_of=` | 觀測序列（`as_of` 觸發回放） |
 | `GET /v1/nowcast` | 各網域當前等級 |
+| `GET /v1/forecast?target=kp\|hp30&horizon=` | 預報序列，**每一列附該 horizon 的實測技巧與最佳基線** |
 | `GET /v1/events?from=&to=` | 事件卡清單 |
 | `GET /v1/events/{id}` | 單一事件卡（SDA 介接格式） |
 | `GET /v1/events/{id}/history` | 事件卡修訂歷程 |
@@ -831,6 +925,7 @@ S4 有了、ROTI 仍無來源，故為 `partial`——規則會在 S4 超標時�
 | IGRF 臺灣參考場 | `python -c "import sys;sys.path.insert(0,'packages');from geomag import summary;print(summary())"` | F≈45,007 nT、D≈−4.62°、I≈35.13° |
 | 密度修正倍率 | `python -m services.exporter.drag_correction --start 2024-05-08 --end 2024-05-14` | 峰值 3.67×（500–600 km） |
 | 預報驗證表 | `python -m services.forecast.run --verify --splits 4` | 與 `docs/forecast_verification.md` 相同 |
+| Hp30 1 小時預報 | `python -m services.forecast.run --verify --target hp30` | gbm MAE 0.495、POD 0.601、FAR 0.337、BSS 0.475、中位提前量 1.0 h |
 | 門檻掃描 | `python tools/whatif_threshold.py --rule ORB-L3-KP6 --param KP_3H --sweep 5,6,7,8` | Kp≥6 約每年 10.5 次 |
 | 密度模型分歧 | `python tools/density_cross_check.py` | MSIS 2.1 vs NRLMSISE-00 相差 7.3–8.8% |
 | 實測密度 vs 模式 | `python tools/density_obs_vs_model.py --start 2024-04-29 --end 2024-05-20` | 觀測 <1.5 時比值 0.85、1.5–2.5 時 1.40、≥3.5 時 1.70 |

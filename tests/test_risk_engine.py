@@ -257,3 +257,32 @@ def test_unavailable_only_when_no_criterion_has_data():
     _, status = RiskEngine(store, rules=[rule]).evaluate(
         start=t0, end=t0 + timedelta(hours=4))
     assert status[status["rule_id"] == "GNSS-L3-SCINT"].iloc[0]["status"] == "unavailable"
+
+
+def test_declared_domain_without_rules_is_listed_as_no_criteria():
+    """已宣告但尚無規則的網域必須出現在 nowcast 上，且不得被當成已評估。
+
+    VHF/UHF、SATCOM（S/X/Ka）、衛星操作是構想書影響矩陣要求的欄位，
+    已宣告於 params.yaml 的 `impact_domains`，但 configs/rules 還沒有對應規則。
+    若讓它們從表上消失，畫面上「少一列」與「綠燈」難以分辨——讀者會把
+    「還沒訂門檻」讀成「查過沒事」。這與參數層級的「沒資料 ≠ 沒事」同一條原則。
+    """
+    import tempfile
+
+    from services.risk_engine.engine import RiskEngine
+
+    engine = RiskEngine(SwxStore(tempfile.mkdtemp()))
+    now = engine.nowcast()
+    listed = set(now["domain"])
+    declared = set(registry().impact_domains)
+
+    assert declared <= listed, f"已宣告卻未列出的網域：{sorted(declared - listed)}"
+
+    ruleless = declared - {r.domain for r in engine.rules}
+    assert ruleless, "此測試假設仍有尚未建立規則的網域；若已全數補齊請改寫本測試"
+    for domain in ruleless:
+        row = now[now["domain"] == domain].iloc[0]
+        assert row["criteria_total"] == 0
+        assert row["level"] == "—", "無判據不得顯示為 L0"
+        assert not row["fully_evaluated"], "沒有規則不等於全部通過"
+        assert row["inference"] == "unavailable"
