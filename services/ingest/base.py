@@ -67,15 +67,19 @@ class FetchOutcome:
     mode: str = "remote"           # remote / local_fallback / skipped
     raw_path: Path | None = None
     error: str | None = None
+    #: 部分成功的說明。一個來源內含多個子項（如 e-GNSS 的三個網）時，
+    #: 少抓到一個仍會回報成功——不把它說出來，缺的那一份會安靜消失。
+    warnings: tuple[str, ...] = ()
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     elapsed_s: float = 0.0
 
     def __str__(self) -> str:
         if not self.ok:
             return f"✗ {self.source_id}: {self.error}"
+        tail = f"　⚠ {'; '.join(self.warnings)}" if self.warnings else ""
         return (
             f"✓ {self.source_id} [{self.mode}] 解析 {self.rows} 列，"
-            f"寫入 {self.written}（未變更 {self.skipped}），{self.elapsed_s:.1f}s"
+            f"寫入 {self.written}（未變更 {self.skipped}），{self.elapsed_s:.1f}s{tail}"
         )
 
 
@@ -92,6 +96,7 @@ class Connector(ABC):
         self.timeout_s = timeout_s
         self.retry_attempts = retry_attempts
         self.retry_backoff_s = retry_backoff_s
+        self._warnings: list[str] = []
 
     # ── 子類別必須實作 ──────────────────────────────────────────────────
     @abstractmethod
@@ -129,6 +134,10 @@ class Connector(ABC):
             + ("（且無 local_fallback）" if not local else f"（local_fallback 不存在：{local}）")
         )
 
+    def warn(self, message: str) -> None:
+        """記下部分失敗，由 run() 一併回報。parse() 內呼叫。"""
+        self._warnings.append(message)
+
     def latest_raw(self) -> Path | None:
         """本來源最新一份原始落地檔。找不到時回 None。"""
         root = self.store.raw_root / self.spec.source_id
@@ -136,6 +145,25 @@ class Connector(ABC):
             return None
         files = sorted(root.rglob(f"*.{self.raw_ext.lstrip('.')}"))
         return files[-1] if files else None
+
+    def fetch_related(self, url: str) -> bytes:
+        """抓取同一來源的附屬檔案（如頁面所引用的圖表），沿用退避重試。
+
+        主頁面有重試、附屬檔案沒有的話，一次瞬斷就少一份子項資料，
+        而且因為部分成功仍回報 ok，缺的那份不會有人發現。
+        """
+        errors = []
+        for attempt in range(1, self.retry_attempts + 1):
+            try:
+                with _session_for(self.spec) as sess:
+                    resp = sess.get(url, timeout=self.timeout_s)
+                resp.raise_for_status()
+                return resp.content
+            except Exception as exc:                        # noqa: BLE001
+                errors.append(f"attempt{attempt}: {type(exc).__name__}")
+                if attempt < self.retry_attempts:
+                    time.sleep(self.retry_backoff_s * attempt)
+        raise RuntimeError(f"{url} 取得失敗：{'; '.join(errors)}")
 
     def run(
         self,
@@ -162,6 +190,7 @@ class Connector(ABC):
         """
         started = datetime.now(timezone.utc)
         outcome = FetchOutcome(source_id=self.spec.source_id, ok=False, started_at=started)
+        self._warnings = []
         try:
             if reparse:
                 raw_path = self.latest_raw()
@@ -195,6 +224,7 @@ class Connector(ABC):
                 df, source_id=self.spec.source_id, ingest_time=stamp, dedupe=dedupe,
             )
             outcome.written = result.rows_written
+            outcome.warnings = tuple(self._warnings)
             outcome.skipped = result.rows_skipped
             outcome.ok = True
         except Exception as exc:  # noqa: BLE001 - 單一來源失敗不應中斷整批排程

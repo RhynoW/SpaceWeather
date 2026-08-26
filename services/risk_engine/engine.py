@@ -216,9 +216,21 @@ class RiskEngine:
         self.registry = registry()
 
     # ── 序列準備 ────────────────────────────────────────────────────────
-    def _series(self, param: str, start, end, as_of) -> pd.Series:
-        s = self.store.series(param, start=start, end=end, as_of=as_of)
-        return s[~s.index.duplicated(keep="last")].sort_index()
+    def _series(self, param: str, start, end, as_of, region: str | None = None) -> pd.Series:
+        """規則所需的單一序列。
+
+        分區參數（如 e-GNSS 三個網的 I95）同一時刻有多個合法值。處理方式有二：
+
+          規則宣告 region  取該分區的值。這是正確作法——本島的作業不該因為
+                           澎湖網的尖峰而被判為嚴重。
+          未宣告 region    取**同時刻的最大值**（最壞情況），而不是任意一列。
+                           舊行為是 `duplicated(keep="last")`，等於讓 parquet
+                           的列序決定判讀結果——不會報錯，只是安靜地看錯網。
+        """
+        s = self.store.series(param, start=start, end=end, as_of=as_of, grid_id=region)
+        if s.index.has_duplicates:
+            s = s.groupby(level=0).max()
+        return s.sort_index()
 
     @staticmethod
     def _dwell_mask(cond_true: pd.Series, dwell_h: float) -> pd.Series:
@@ -259,7 +271,7 @@ class RiskEngine:
         """
         series: dict[str, pd.Series] = {}
         for p in rule.params:
-            series[p] = self._series(p, start, end, as_of)
+            series[p] = self._series(p, start, end, as_of, rule.region)
 
         needed = rule.requires_params or tuple(rule.params)
         missing = [p for p in needed
