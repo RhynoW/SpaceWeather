@@ -239,12 +239,18 @@ class SwxStore:
         observed_only: bool = False,
         include_rejected: bool = False,
         source_id: str | None = None,
+        grid_id: str | None = None,
     ) -> pd.DataFrame:
         """雙時間軸查詢。
 
         as_of 為回放的關鍵：只取 ingest_time <= as_of 的列，
         亦即「在那個時刻，系統所能知道的內容」，避免前視偏差。
         同一 (param, valid_time) 有多來源／多版本時，取 tier 最小、ingest 最新者。
+
+        **去重鍵含 grid_id**：分區資料（如 e-GNSS 三個網的 I95）在同一時刻
+        本來就有多個合法值，不含 grid_id 會讓三個網互相蓋掉、只剩一個而不報錯。
+        既有的純量參數 grid_id 皆為 NULL，DuckDB 的 DISTINCT ON 視 NULL 相等，
+        故對它們是無異動。
         """
         codes = [params] if isinstance(params, str) else params
         globs = self.globs(codes)
@@ -268,6 +274,9 @@ class SwxStore:
         if source_id is not None:
             where.append("source_id = ?")
             args.append(source_id)
+        if grid_id is not None:
+            where.append("grid_id = ?")
+            args.append(grid_id)
         if observed_only:
             where.append(f"data_type IN ({','.join(['?'] * len(OBSERVED_TYPES))})")
             args.extend(OBSERVED_TYPES)
@@ -276,10 +285,11 @@ class SwxStore:
             args.append(QUALITY_REJECTED)
 
         sql = f"""
-            SELECT DISTINCT ON (param_code, valid_time) *
+            SELECT DISTINCT ON (param_code, valid_time, grid_id) *
             FROM read_parquet({globs!r}, union_by_name=true)
             WHERE {' AND '.join(where)}
-            ORDER BY param_code, valid_time, source_tier, ingest_time DESC, revision DESC
+            ORDER BY param_code, valid_time, grid_id, source_tier, ingest_time DESC,
+                     revision DESC
         """
         with self.connect() as con:
             df = con.execute(sql, args).fetchdf()
