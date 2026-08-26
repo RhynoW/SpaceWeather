@@ -51,7 +51,8 @@ def live_data_root() -> Path:
 def live_sources(*, include_heavy: bool = False) -> list[str]:
     """自動更新納入的來源。
 
-    實測各來源耗時（見 docs/operations_manual.md）：快速通道 15 個合計約 28 秒，
+    實測各來源耗時（見 docs/operations_manual.md）：快速通道 16 個合計約 25–33 秒
+    （其中 nlsc_egnss_i95 約 3–4 秒：一頁 HTML 加三張圖表），
     加上 gfz_hp30 則增為約 74 秒——後者不適合放在頁面載入路徑上。
     """
     skip = EXCLUDE_FROM_REFRESH - (HEAVY_SOURCES if include_heavy else frozenset())

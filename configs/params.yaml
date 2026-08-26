@@ -489,7 +489,7 @@ params:
     valid_max: 100.0
     cadence_s: 3600
     impacts: [GNSS_PNT, GNSS_RTK]
-    status: planned
+    status: ready
   - code: FOF2
     name_zh: F2 層臨界頻率
     name_en: foF2

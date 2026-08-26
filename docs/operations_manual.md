@@ -309,7 +309,16 @@ python -m services.ingest.run --source omni2_hourly --years 6
 
 # 封閉網路：只用本地種子檔
 python -m services.ingest.run --source all --offline
+
+# e-GNSS I95 連線與版面檢查（已納入自動更新；外部端點改版時用它定位問題）
+python tools/i95_smoke.py
 ```
+
+> **I95 的授權狀態**：來源 `nlsc_egnss_i95` 已納入自動更新，但**使用授權仍在申請中**
+> （經夏漢民太空中心向內政部國土測繪中心提出）。先輪詢的理由是它**沒有回填管道**
+> ——歷史只能自開始輪詢之日起累積，晚一天就少一天。
+> 核准前：原始圖檔與衍生數值不進公開版控、不放進 `data/demo`，
+> 對外引用一律標註國土測繪中心為資料產製者。
 
 > ⚠️ **`--backfill` 只在首次建庫用。**
 > 例行擷取加上它會用推算的 `ingest_time` 覆蓋真實入庫時間，使後續的回放結果失真。
