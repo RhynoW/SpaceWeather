@@ -461,10 +461,9 @@ sources:
     # 憑證鏈與 CWA SWOO 同源問題：標準驗證回 CERTIFICATE_VERIFY_FAILED。
     # **憑證鏈與主機名仍完整驗證**，僅放寬 X.509 STRICT 的擴充欄位一致性檢查。
     tls_relaxed_strict: true
-    networks:                     # 圖檔檔名中的報表編號 → 網別
-      "22": RTKVRSNet             # 臺灣本島 VRS 網
-      "24": Kinmen                # 金門
-      "25": Peng_Hu               # 澎湖
+    # 網別直接取自檔名中的代號（RTKVRSNet／Kinmen／Peng_Hu），不另設對應表：
+    # 檔名前面的報表編號會輪替（實測 08-19 為 22/24/25，08-26 變 26/28/29），
+    # 以編號對應網別遲早會標錯網。需要改顯示名稱時才加 networks（鍵為網別代號）。
     notes: >
       **I95 是本案唯一有作業單位公告門檻的判據**（>8 警戒、20–30 環境良好可嘗試、
       持續 >30 應避開），門檻一律引用官方值，本案不自創。

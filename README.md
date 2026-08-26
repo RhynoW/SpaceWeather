@@ -1004,7 +1004,10 @@ python -m services.ingest.refresh --force --full    # 強制，含重量級來�
 | Main file path | `apps/dashboard/app.py` |
 | 部署網址 | <https://spaceweather.streamlit.app/> |
 
-**不需要設定任何 secrets 或環境變數。**
+**不需要設定任何 secrets。** 環境變數只有一個選用項：
+`SWX_DISABLE_SOURCES`（逗號分隔的 `source_id`）可在**單一站台**關掉個別來源，
+不必改 `configs/sources.yaml`——後者會連排程主機與本機開發環境一起關掉。
+
 雲端是全新 clone、`data/` 沒有觀測分區，此時 `swx_core.config.data_dir()`
 會自動退回 `data/demo/` 的示範快照（含 449 個 Parquet 分區、36 個參數），
 因此**一開啟就有畫面**，不必等待線上擷取。
@@ -1029,6 +1032,21 @@ python -m services.ingest.run --source all   # ← 不要在 Streamlit Cloud 內
 
 正確作法是把擷取與儲存放到 app 之外：以獨立 worker／排程主機執行擷取，
 寫入持久化儲存（物件儲存或資料庫），app 只讀。
+
+**雲端站台與 e-GNSS I95**：I95 的使用授權**仍在申請中**（經夏漢民太空中心
+協助向國土測繪中心提出）。雲端站台跑的是同一份設定，因此也會擷取 I95 並在
+「RTK 現場查核」頁顯示；核准前的處置是：**不進版控、不進 `data/demo`**，
+畫面上一律標示為由官方圖表擷取的非官方衍生值並標註產製者。
+若需要在核准前讓公開站台完全不碰它，於該站台設
+`SWX_DISABLE_SOURCES=nlsc_egnss_i95` 即可，排程主機仍照常累積歷史
+（I95 沒有回填管道，停掉的時段事後補不回來）。
+
+**「RTK 現場查核」頁看不到 I95 時**，該頁會直接說出成因，不必進容器查：
+`running` 還在抓、`skipped` 沒納入更新（去看 `status` 與 `SWX_DISABLE_SOURCES`）、
+`failed` 抓了但失敗（去看網路與憑證）、`empty` 抓到了但圖上讀不出數值
+（對方版面可能改版）、`ok` 抓到了但查詢窗內沒有落點。
+「資料健康」頁另有一張**逐來源**的最近更新結果表——上方的通道表只看得到
+已寫進資料層的參數，一個從頭到尾抓失敗的來源在那裡是隱形的。
 
 **安全性**：本專案目前所有資料源皆為公開、免認證，
 因此雲端部署**不需要任何憑證**。日後若接入需認證的來源

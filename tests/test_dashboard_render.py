@@ -41,6 +41,38 @@ def test_page_renders_without_exception(page: str):
     )
 
 
+def test_rtk_page_says_why_i95_is_missing(tmp_path, monkeypatch):
+    """沒有 I95 時，畫面必須說出**是哪一種沒有**。
+
+    雲端站台沒有終端機可下指令；畫面只寫「目前沒有資料」的話，
+    值勤的人分不出是還沒抓、抓失敗、還是抓到了讀不出數值——
+    這三種要找的人完全不同。
+    """
+    monkeypatch.setenv("SWX_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SWX_DISABLE_SOURCES", "nlsc_egnss_i95")
+
+    # Streamlit 的快取是**行程層級**的：同一輪 pytest 裡先前那次 AppTest
+    # 已經用真實 data/ 建好 store 並存進 cache_resource，不清掉的話
+    # 這裡改的 SWX_DATA_DIR 根本不會生效，測試會在單獨跑時過、整批跑時掛。
+    import streamlit as _st
+
+    _st.cache_data.clear()
+    _st.cache_resource.clear()
+
+    app = AppTest.from_file(APP_PATH, default_timeout=120)
+    app.run()
+    app.sidebar.radio[0].set_value("RTK 現場查核").run()
+    assert not app.exception, (
+        "無 I95 時 RTK 頁渲染失敗："
+        + "; ".join(str(e.message) for e in app.exception)
+    )
+
+    text = " ".join(str(b.value) for b in app.info)
+    assert "nlsc_egnss_i95" in text, "空狀態沒有指出是哪個來源"
+    assert any(code in text for code in
+               ("running", "skipped", "failed", "empty", "ok", "not_run")),         "空狀態沒有說出更新結果的狀態碼"
+
+
 def test_sidebar_offers_every_documented_page():
     """側欄實際提供的選項要與文件一致（與 test_dashboard_pages 的靜態檢查互補）。"""
     app = AppTest.from_file(APP_PATH, default_timeout=120)

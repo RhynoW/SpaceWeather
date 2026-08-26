@@ -139,13 +139,19 @@ class NlscEgnssConnector(Connector):
     raw_ext = "html"
 
     def _chart_urls(self, payload: bytes) -> list[tuple[str, str, datetime]]:
-        """回傳 [(網別, 圖檔絕對網址, 該圖的日期)]，同一網只取一張。"""
+        """回傳 [(網別, 圖檔絕對網址, 該圖的日期)]，同一網只取一張。
+
+        網別取自**檔名中的網別代號**（RTKVRSNet／Kinmen／Peng_Hu），
+        不取前面的報表編號——編號會輪替（實測 2026-08-19 為 22／24／25，
+        08-26 已變成 26／28／29）。拿輪替的編號去對應網別，遲早會把某一網的
+        資料標成另一網，而且分網儲存的整個目的就是不讓兩邊互相污染。
+        `networks` 設定僅作為顯示別名（鍵為網別代號），沒有設就用原代號。
+        """
         html = payload.decode("utf-8", errors="replace")
-        networks = {str(k): v for k, v in (self.spec.raw.get("networks") or {}).items()}
+        aliases = {str(k): v for k, v in (self.spec.raw.get("networks") or {}).items()}
         seen: dict[str, tuple[str, str, datetime]] = {}
         for m in _CHART_RE.finditer(html):
-            report = m.group("report")
-            name = networks.get(report, m.group("network"))
+            name = aliases.get(m.group("network"), m.group("network"))
             if name in seen:
                 continue
             # 檔名的時間窗 <前一日>235942 - <當日>235942：長條的小時屬**窗末那一天**
