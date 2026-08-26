@@ -21,6 +21,7 @@ IMPORT_TO_PACKAGE = {
     "sklearn": "scikit-learn",
     "flask_cors": "flask-cors",
     "docx": "python-docx",
+    "PIL": "pillow",
 }
 
 # 本專案自有模組與標準庫（不需宣告）

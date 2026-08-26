@@ -1,0 +1,143 @@
+# RTK 影響矩陣：模式 × 基線長度 × 事件型態（構想書議題五）
+#
+# 為什麼要有「模式」這個維度：單基站與網路 RTK（VBS）的失敗機制不同。
+#
+#   單基站  雙差殘差隨基線長度放大，主導量是**基線兩端的電離層／對流層差異**。
+#           同一場擾動下，5 km 基線幾乎不受影響、50 km 可能整天固定不了。
+#   VBS     虛擬基站已由網內多站內插吸收大部分空間相關誤差，風險幾乎與
+#           基線長度脫鉤，改由**內插殘差**主導——而 I95 量的就是這個殘差。
+#
+# 把兩者合併成單一風險等級會同時誤導兩邊：對短基線單基站作業過度告警，
+# 對 VBS 作業則給錯方向的處置建議（叫人「縮短基線」對 VBS 沒有意義）。
+#
+# 本檔為**判讀矩陣**（供現場查核表與事件卡引用），不是規則引擎的門檻來源；
+# 門檻在 configs/rules/gnss_rtk.yaml，且引用官方公告值。
+
+version: 2026.1-draft
+calibrated: false
+
+# ── 事件型態 ──────────────────────────────────────────────────────────
+event_types:
+  quiet:
+    name_zh: 平靜（背景日變化）
+    name_en: Quiet / diurnal background
+    driver: 赤道異常（EIA）的正常日變化
+    note: >
+      **不是「沒事」。** 臺灣地磁緯度約 19°N 落在赤道異常駝峰區，
+      平靜日的午後 I95 照樣可以到 15–21（2026-08-26 實測，當日 Kp≤0.67）。
+  eia_crest:
+    name_zh: 赤道異常駝峰增強（午後）
+    name_en: EIA crest enhancement
+    driver: 日照增強使電子密度升高，水平 TEC 梯度加大
+    note: 典型時段為當地 12:00–19:00；影響的是**梯度**，不只是絕對 TEC。
+  scintillation:
+    name_zh: 電離層閃爍／電漿泡
+    name_en: Scintillation / plasma bubbles
+    driver: 日落後電漿不穩定生成的不規則體
+    note: 典型時段為當地 20:00–02:00，分點月份較強；造成週跳與失鎖而非單純梯度。
+  geomagnetic_storm:
+    name_zh: 地磁暴與 TID
+    name_en: Geomagnetic storm / TID
+    driver: 暴時電場穿透與行進式電離層擾動
+    note: 會疊加在上述背景之上，但**不是低緯度 RTK 的主要肇因**。
+  solar_flare:
+    name_zh: 太陽閃焰（SITEC）
+    name_en: Solar flare / sudden increase of TEC
+    driver: X 射線暴增造成日照側 TEC 突增
+    note: 影響短暫（數十分鐘），對單頻與初始化中的作業較明顯。
+
+# ── 模式 ──────────────────────────────────────────────────────────────
+modes:
+  single_base:
+    name_zh: 單基站 RTK
+    name_en: Single-base RTK
+    primary_index: 基線長度 × 電離層狀態
+    # 基線分層：工程上的概略範圍，不是任何接收機的硬性規格。
+    # 實際可用距離另受多頻多星系、模糊度固定演算法、兩端高差、
+    # 衛星幾何與多路徑環境影響。
+    baseline_bands:
+      - {range_km: [0, 10],    name: 短基線,   note: 大氣誤差高度相關，雙差後大多可消除}
+      - {range_km: [10, 20],   name: 中短基線, note: 開始受電離層與對流層差異影響}
+      - {range_km: [20, 50],   name: 中長基線, note: 需多頻觀測與大氣模型；固定時間明顯拉長}
+      - {range_km: [50, 100],  name: 長基線,   note: 傳統雙差固定可靠度明顯下降}
+      - {range_km: [100, null], name: 超長基線, note: 不宜視為一般單基站 RTK，應改網路 RTK}
+  network_vbs:
+    name_zh: 網路 RTK（VBS）
+    name_en: Network RTK / VBS
+    primary_index: I95
+    baseline_bands:
+      - {range_km: [0, null], name: 不適用, note: 虛擬基站就在測站附近，風險由內插殘差決定}
+
+# ── 矩陣本體 ──────────────────────────────────────────────────────────
+# 每個 mode × event_type 都必須有一格（測試 test_matrix_has_no_empty_cells 檢查）。
+# level 為建議的 L0–L4 起始等級；實際等級以規則引擎判定為準。
+cells:
+  single_base:
+    quiet:
+      level: L0
+      short_baseline: 一般可正常固定
+      long_baseline: 20 km 以上午後仍可能拉長固定時間
+      action: 例行作業；長基線避開午後尖峰
+    eia_crest:
+      level: L2
+      short_baseline: 10 km 內影響有限
+      long_baseline: 20–50 km 固定率明顯下降，>50 km 可能整段無法固定
+      action: 縮短基線或改用網路 RTK；改期至上午或傍晚
+    scintillation:
+      level: L3
+      short_baseline: 短基線亦受影響——失鎖與週跳和距離無關
+      long_baseline: 固定解反覆失效，重新初始化頻繁
+      action: 延後作業；改多頻多星系；必要時改靜態後處理
+    geomagnetic_storm:
+      level: L2
+      short_baseline: 影響有限，但 TID 通過時仍可能短暫掉解
+      long_baseline: 梯度增強疊加於背景之上，長基線風險最高
+      action: 縮短基線、延長觀測；高精度作業預留額外時間
+    solar_flare:
+      level: L1
+      short_baseline: 影響短暫，雙頻多可吸收
+      long_baseline: 初始化中的作業可能需重新開始
+      action: 延後正在初始化的作業數十分鐘
+  network_vbs:
+    quiet:
+      level: L0
+      short_baseline: 正常作業
+      long_baseline: 不適用（風險不隨基線長度變化）
+      action: 例行作業；仍應確認差分資料 age 正常
+    eia_crest:
+      level: L2
+      short_baseline: 以 I95 判讀：8–20 可作業、20–30 僅環境良好地區嘗試
+      long_baseline: 不適用
+      action: 依 I95 分段處置；避開 I95 尖峰時段
+    scintillation:
+      level: L3
+      short_baseline: VBS 無法補償失鎖；內插亦因不規則體而劣化
+      long_baseline: 不適用
+      action: 延後作業；改多頻多星系；必要時改靜態後處理
+    geomagnetic_storm:
+      level: L2
+      short_baseline: 內插殘差上升，I95 通常同步升高
+      long_baseline: 不適用
+      action: 依 I95 判讀為主；地磁指數僅作背景加註
+    solar_flare:
+      level: L1
+      short_baseline: 短暫影響；VBS 改正播發本身不受影響
+      long_baseline: 不適用
+      action: 延後正在初始化的作業數十分鐘
+
+# ── 現場查核：兩類肇因必須分開 ────────────────────────────────────────
+# 排除服務與設備因素之前，不得歸因於太空天氣；反之，I95 高的時候
+# 也不該讓現場一路去查接收機設定。
+triage:
+  space_environment:
+    - {check: I95 目前值與趨勢, source: e-GNSS 服務網頁, threshold: 8／20／30（官方公告）}
+    - {check: 閃爍（S4／ROTI）, source: 本系統 GNSS_RTK 網域, threshold: S4≥0.6／ROTI≥0.8（未校準）}
+    - {check: 地磁擾動（Kp／Hp30／Dst）, source: 本系統, threshold: Kp≥5（間接推估）}
+    - {check: 大型閃焰（GOES X 射線）, source: 本系統, threshold: M5 以上（間接推估）}
+  service_and_equipment:
+    - {check: e-GNSS 服務網是否正常, source: 官方服務網頁}
+    - {check: RTCM 差分電文是否持續接收, source: 接收機狀態}
+    - {check: NTRIP 延遲與差分資料 age, source: 接收機狀態}
+    - {check: Mountpoint 之 RTCM 版本是否與接收機相容, source: 服務設定}
+    - {check: 接收機支援之星系（GPS／Galileo／BeiDou／GLONASS）, source: 接收機規格}
+    - {check: 遮蔽與多路徑環境, source: 現場}

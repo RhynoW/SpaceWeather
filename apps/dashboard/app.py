@@ -573,7 +573,7 @@ if _ORIGIN["is_demo"]:
 st.sidebar.title("🛰 SWX-SDA")
 st.sidebar.caption("太空天氣整合資訊與 SDA 應用系統")
 PAGES = ["值勤模式", "太空環境總覽", "太陽與行星際影像", "參數時序", "事件卡",
-         "太陽閃焰", "短時預報", "地磁基準場", "軌道與密度修正",
+         "太陽閃焰", "短時預報", "RTK 現場查核", "地磁基準場", "軌道與密度修正",
          "資料健康", "門檻校準", "名詞與判讀", "使用指南", "STEM 教學"]
 
 # 網址代稱：讓每一頁都能被直接連結。用 ASCII 而非中文頁名，
@@ -581,7 +581,8 @@ PAGES = ["值勤模式", "太空環境總覽", "太陽與行星際影像", "參�
 PAGE_SLUGS = {
     "值勤模式": "duty", "太空環境總覽": "overview", "太陽與行星際影像": "imagery",
     "參數時序": "series", "事件卡": "events", "太陽閃焰": "flares",
-    "短時預報": "forecast", "地磁基準場": "geomag", "軌道與密度修正": "density",
+    "短時預報": "forecast", "RTK 現場查核": "rtk",
+    "地磁基準場": "geomag", "軌道與密度修正": "density",
     "資料健康": "health", "門檻校準": "thresholds", "名詞與判讀": "glossary",
     "使用指南": "guide", "STEM 教學": "stem",
 }
@@ -1185,6 +1186,150 @@ elif page == "短時預報":
     )
     st.caption("完整擂台（含所有基線與列聯表）見 `docs/forecast_verification.md`；"
                "機器可讀版見 `docs/forecast_skill.json`，API 為 `GET /v1/forecast`。")
+
+
+# ── 6. RTK 現場查核（議題五）──────────────────────────────────────────
+elif page == "RTK 現場查核":
+    import yaml as _yaml
+
+    from swx_core import config_dir
+
+    st.title("RTK 現場查核")
+    st.caption("構想書議題五：分任務的影響矩陣，並區分太空天氣與服務／設備因素")
+
+    matrix = _yaml.safe_load(
+        (config_dir() / "matrix" / "rtk.yaml").read_text(encoding="utf-8"))
+    rtk_rules = _yaml.safe_load(
+        (config_dir() / "rules" / "gnss_rtk.yaml").read_text(encoding="utf-8"))
+    i95_src = (rtk_rules.get("threshold_sources") or {}).get("I95", {})
+
+    # ── 目前狀態 ────────────────────────────────────────────────────
+    st.subheader("目前 I95")
+    store = get_store()
+    now_t = datetime.now(timezone.utc)
+    i95 = store.query("I95", start=now_t - timedelta(days=2), end=now_t)
+
+    def _band(v: float) -> tuple[str, str]:
+        """回傳 (等級, 官方判讀)。門檻引用國土測繪中心公告值。"""
+        if v >= 30:
+            return "L3", "持續超過 30：建議避開該時段作業"
+        if v >= 20:
+            return "L2", "20–30：建議僅在作業環境良好地區嘗試"
+        if v >= 8:
+            return "L1", "超過警戒值 8：仍為可作業時段，需留意"
+        return "L0", "低於警戒值"
+
+    if i95.empty:
+        st.info(
+            "**尚未介接 I95。** 來源 `nlsc_egnss_i95` 目前為 `planned`——"
+            "連接器已實作並實測可連線，但使用條款與取得方式待與國土測繪中心確認。\n\n"
+            "在此之前，本頁下方的矩陣與查核表仍可使用；"
+            "地磁與閃焰等間接判據見「值勤模式」頁，但**間接判據不足以判斷 RTK 可否作業**"
+            "（2026-08-26 實測：Kp≤0.67 的平靜日，I95 仍整個下午超過警戒值）。"
+        )
+    else:
+        latest = (i95.sort_values("valid_time").groupby("grid_id").tail(1)
+                  .sort_values("grid_id"))
+        cols = st.columns(len(latest))
+        names = {"RTKVRSNet": "臺灣本島 VRS", "Kinmen": "金門", "Peng_Hu": "澎湖"}
+        for col, (_, row) in zip(cols, latest.iterrows()):
+            level, note = _band(float(row["value"]))
+            color = LEVEL_COLOR.get(level, "#888")
+            with col:
+                st.markdown(
+                    f"<div style='padding:14px;border-radius:8px;background:#2b2b2b;"
+                    f"border-left:6px solid {color}'>"
+                    f"<b>{names.get(row['grid_id'], row['grid_id'])}</b><br>"
+                    f"<span style='font-size:2em;color:{color}'>{row['value']:.1f}</span>"
+                    f"<br><small>{level}｜{note}</small>"
+                    f"<br><small>{pd.Timestamp(row['valid_time']):%m-%d %H:%M}Z</small></div>",
+                    unsafe_allow_html=True,
+                )
+        st.caption(
+            "數值由官方圖表擷取（非官方衍生值，精度約 ±0.5，quality_flag=suspect）。"
+            "分級規則只以**臺灣本島 VRS 網**判讀——本島作業不該因澎湖網的尖峰被判為嚴重。"
+        )
+        fig = px.bar(i95.sort_values("valid_time"), x="valid_time", y="value",
+                     color="grid_id", barmode="group")
+        for y, c in ((8, "#e8a33d"), (20, "#d84315"), (30, "#b71c1c")):
+            fig.add_hline(y=y, line_dash="dash", line_color=c,
+                          annotation_text=f"I95 {y}")
+        fig.update_layout(height=320, margin=dict(l=0, r=0, t=10, b=0),
+                          yaxis_title="I95", xaxis_title="")
+        st.plotly_chart(fig, width='stretch')
+
+    st.info(
+        f"**門檻出處：{i95_src.get('authority', '—')}**　"
+        f"{i95_src.get('statement', '')}\n\n"
+        "本案不自創這組門檻——它是目前唯一有作業單位背書的判據。"
+    )
+
+    # ── 兩類肇因 ────────────────────────────────────────────────────
+    st.divider()
+    st.subheader("無法收斂時：兩類肇因要分開查")
+    st.markdown(
+        "**排除服務與設備因素之前，不得歸因於太空天氣**；反過來說，"
+        "I95 已經超標時也不該讓現場一路去查接收機設定。"
+    )
+    triage = matrix.get("triage", {})
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**太空環境**")
+        st.dataframe(pd.DataFrame(triage.get("space_environment", [])),
+                     width='stretch', hide_index=True)
+    with c2:
+        st.markdown("**服務與設備**")
+        st.dataframe(pd.DataFrame(triage.get("service_and_equipment", [])),
+                     width='stretch', hide_index=True)
+
+    # ── 影響矩陣 ────────────────────────────────────────────────────
+    st.divider()
+    st.subheader("影響矩陣：模式 × 事件型態")
+    modes = matrix.get("modes", {})
+    mode_key = st.radio(
+        "作業模式", list(modes), horizontal=True,
+        format_func=lambda k: modes[k].get("name_zh", k),
+        help="單基站的風險隨基線長度放大；VBS 的風險由網內內插殘差（I95）決定，"
+             "幾乎與基線長度脫鉤。兩者的處置建議不同，叫 VBS 使用者「縮短基線」沒有意義。",
+    )
+    st.caption(f"主導量：{modes[mode_key].get('primary_index', '—')}")
+
+    events = matrix.get("event_types", {})
+    cells = (matrix.get("cells", {}) or {}).get(mode_key, {})
+    rows = []
+    for ev_key, ev in events.items():
+        cell = cells.get(ev_key, {})
+        rows.append({
+            "事件型態": ev.get("name_zh", ev_key),
+            "驅動機制": ev.get("driver", ""),
+            "建議起始等級": cell.get("level", "—"),
+            "短基線／一般": cell.get("short_baseline", "—"),
+            "長基線": cell.get("long_baseline", "—"),
+            "處置": cell.get("action", "—"),
+        })
+    st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True)
+
+    with st.expander("各事件型態的補充說明"):
+        for ev_key, ev in events.items():
+            st.markdown(f"**{ev.get('name_zh', ev_key)}**　{ev.get('note', '')}")
+
+    if mode_key == "single_base":
+        st.markdown("**基線長度分層**（工程上的概略範圍，非任何接收機的硬性規格）")
+        bands = []
+        for b in modes[mode_key].get("baseline_bands", []):
+            lo, hi = b.get("range_km", [None, None])
+            bands.append({"基線": b.get("name"),
+                          "範圍": f"{lo}–{hi} km" if hi else f"> {lo} km",
+                          "說明": b.get("note")})
+        st.dataframe(pd.DataFrame(bands), width='stretch', hide_index=True)
+        st.caption(
+            "實際可用距離另受多頻多星系、模糊度固定演算法、兩端高差、衛星幾何與"
+            "多路徑環境影響。「超過 10 km 就一定不能固定」並不正確；"
+            "比較準確的說法是：距離越長，固定所需的觀測品質與模型能力越高。"
+        )
+
+    st.caption("矩陣定義於 `configs/matrix/rtk.yaml`，分級門檻於 "
+               "`configs/rules/gnss_rtk.yaml`（門檻引用官方公告值）。")
 
 
 # ── 6. 地磁基準場（議題二）─────────────────────────────────────────────

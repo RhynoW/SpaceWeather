@@ -20,9 +20,10 @@
 | [docs/architecture.md](docs/architecture.md) | 系統架構、設計原則、與構想書七大議題的對應 |
 | [docs/data_sources_c2c3.md](docs/data_sources_c2c3.md) | 地磁與電離層資料源盤查（C2/C3 風險分級之修正） |
 | [docs/forecast_verification.md](docs/forecast_verification.md) | 預報引擎驗證報告（切分明細、列聯表、未達 KPI 之落差） |
+| [docs/rtk_ionosphere.md](docs/rtk_ionosphere.md) | **RTK 能不能收斂**——I95 判據、兩種模式的差異，與「平靜日照樣超標」的實測 |
 | [docs/forecast_skill.json](docs/forecast_skill.json) | **上表的機器可讀版**——API 與儀表板的技巧數字由此取得，不手抄 |
 | [docs/density_model_validation.md](docs/density_model_validation.md) | 大氣密度模型配置、修正因子定義與驗證邊界 |
-| [docs/operations_manual.md](docs/operations_manual.md) | **值勤手冊**（燈號判讀、19 條規則處置對照、維運指令、使用邊界） |
+| [docs/operations_manual.md](docs/operations_manual.md) | **值勤手冊**（燈號判讀、24 條規則處置對照、維運指令、使用邊界） |
 | [docs/glossary.md](docs/glossary.md) | **名詞說明與參數判讀**（教育推廣、值勤判讀、常見誤讀） |
 | [docs/research_review.md](docs/research_review.md) | **依公開學術研究的強化檢視**（文獻對照、建議順序） |
 | [docs/cwa_swoo_analysis.md](docs/cwa_swoo_analysis.md) | 中央氣象署 SWOO 架構分析與介接記錄（授權依據、待確認事項） |
@@ -98,7 +99,9 @@ python -m services.ingest.run --list                    # 先看有哪些來源
 python -m services.ingest.run --source all --backfill   # 首次：回填歷史（約 1 分鐘）
 python -m services.ingest.run --source omni2_hourly --years 6
 # Hp30 例行只解析近 120 天；1 小時預報要訓練資料，需回填歷史（不重抓，改解析既有原始檔）
-python -m services.ingest.run --source gfz_hp30 --reparse --window-days 2100 --backfill   # 預報引擎的訓練資料
+python -m services.ingest.run --source gfz_hp30 --reparse --window-days 2100 --backfill
+# e-GNSS I95（來源為 planned，不納入自動更新；連線與版面檢查用）
+python tools/i95_smoke.py   # 預報引擎的訓練資料
 
 # 2. 端到端演練：資料 → 分級 → 事件卡 → STK 檔 → 密度修正因子
 python tools/e2e_demo.py                        # 預設 2024-05 Gannon G5 事件
@@ -149,11 +152,11 @@ pip install -r requirements.lock   # 重現本文數字時使用
 
 | 層 | 模組 | 狀態 |
 |---|---|---|
-| 擷取層 | `services/ingest` | ✅ 22 個來源（19 個可運作）：CelesTrak、GFZ ×2、SWPC ×9、Kyoto、NASA OMNI2、**中央氣象署 SWOO**、**福衛七號 TACC ×2**（閃爍 `scn1c2`、精密定軌 `leoOrb`）。其中 15 個納入背景自動更新 |
-| 資料層 | `packages/swx_core` | ✅ 雙時間軸 Parquet + DuckDB、品質三級制、47 個註冊參數 |
+| 擷取層 | `services/ingest` | ✅ 23 個來源（19 個可運作）：CelesTrak、GFZ ×2、SWPC ×9、Kyoto、NASA OMNI2、**中央氣象署 SWOO**、**福衛七號 TACC ×2**（閃爍 `scn1c2`、精密定軌 `leoOrb`）。其中 15 個納入背景自動更新 |
+| 資料層 | `packages/swx_core` | ✅ 雙時間軸 Parquet + DuckDB、品質三級制、48 個註冊參數 |
 | 模型層 | `packages/orbit_drag`、`packages/geomag` | ✅ 熱氣層密度／阻力（MSIS 2.1，暴時 ap 模式）＋地磁基準場（IGRF-14）＋TEME↔ITRF 框架轉換（含 EOP，對 astropy 8.0.1 驗證至 0.08 m）；電離層 D 層吸收已接 |
 | 預報層 | `services/forecast` | ⚠️ **功能覆蓋** 兩組目標：Kp（3 小時格點，3–48 h）與 **Hp30（30 分鐘格點，1／3／6 h）**，後者提供構想書要求的 1 小時產品；驗證擂台含命中率、誤警率、**提前量**與可信度四項 KPI。**任何 horizon 皆非正式作業產品**；Hp30 1 h 與 Kp 3–12 h 可作研究參考，**>12 h 為非作業性研究預報**（與 API 的 `not_for_operational_use_beyond_h: 12` 一致） |
-| 風險層 | `services/risk_engine` | ✅ 3 網域 19 條規則、事件卡、作業狀態庫 |
+| 風險層 | `services/risk_engine` | ✅ 4 網域 24 條規則、事件卡、作業狀態庫。新增 **GNSS_RTK**：門檻引用國土測繪中心 I95 公告值（8／20／30），是本案唯一有作業單位背書的判據 |
 | 產品層 | `services/exporter` | ✅ STK/GMAT CSSI 驅動檔、密度修正因子表 |
 | 展示層 | `services/api`、`apps/dashboard` | ✅ REST API＋Streamlit 儀表板（含值勤模式、影像頁、使用指南與四語 STEM 教學頁），端點與頁面集合由契約測試守住，且每頁以 AppTest 實跑驗證可渲染 |
 
@@ -182,7 +185,7 @@ pip install -r requirements.lock   # 重現本文數字時使用
 需夠高取樣率的斜距 TEC，格點 TEC 不可代用）、多頻段影響矩陣的實證校準、
 STK 端實際介接驗證。
 
-分級規則涵蓋 `ORBIT_PREDICTION`、`HF_COMM`、`GNSS_PNT` 三個網域，共 19 條。
+分級規則涵蓋 `ORBIT_PREDICTION`、`HF_COMM`、`GNSS_PNT`、`GNSS_RTK` 四個網域，共 24 條。
 
 構想書要求的影響矩陣還包含 VHF/UHF 與 S/X/Ka（SATCOM）、衛星操作。
 這三個網域已宣告於 `configs/params.yaml` 的 `impact_domains`，
@@ -636,6 +639,7 @@ python tools/make_source_list.py     # → docs/SpaceWeather資料來源清單YY
 |---|---|---|
 | CelesTrak CSSI SW-All | F10.7、Kp、ap、Ap、ISN、Cp、C9 | ✅ 2021→2041（含月預測） |
 | GFZ Kp nowcast | Kp、ap、F10.7、SN | ✅ 備援兼近即時 |
+| **e-GNSS I95**（國土測繪中心） | 基準站網電離層誤差指標，分本島 VRS／金門／澎湖三網 | ◐ 連接器已實作並實測可連線；**使用條款待確認**，故 `status=planned`。官方僅以圖表發布，數值由圖表擷取（非官方衍生值） |
 | GFZ Hp30／ap30 | 30 分鐘地磁指數 | ✅ 提升暴起始時刻解析度；**1 小時預報的目標變數**（例行只解析近 120 天，訓練用歷史以 `--reparse --window-days` 回填） |
 | SWPC GOES X-ray | 0.05–0.4 / 0.1–0.8 nm 通量 | ✅ |
 | SWPC GOES 閃焰事件 | 閃焰起訖時間與 A–X 分級 | ✅ |
@@ -683,6 +687,7 @@ python tools/make_source_list.py     # → docs/SpaceWeather資料來源清單YY
 | 參數時序 | `series` | 任意參數繪圖，可填 as_of 進入回放模式 |
 | 事件卡 | `events` | 事件卡全文與 SDA 介接 JSON、規則可用性 |
 | 太陽閃焰 | `flares` | 閃焰事件表、X 射線時序、D 層吸收 |
+| **RTK 現場查核** | `rtk` | I95 現況（分網）、兩類肇因查核表、模式 × 事件型態影響矩陣 |
 | 短時預報 | `forecast` | 兩組目標（Hp30 1／3／6 h、Kp 3–48 h）；預報值與該 horizon 的實測技巧（POD／FAR／提前量／可信度）並列 |
 | 地磁基準場 | `geomag` | IGRF 參考場、測站表、ΔH 推估、Hp30 解析度對比 |
 | 軌道與密度修正 | `density` | 密度修正倍率、STK 驅動檔下載 |
