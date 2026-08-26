@@ -12,6 +12,10 @@
 **刻意排除的來源**：`omni2_hourly` 是六年份的歷史回填（數十 MB、數十秒），
 拿來當即時更新只會拖垮頁面載入，且它本來就是事後重整資料、無即時價值。
 
+**逐站台停用**：`SWX_DISABLE_SOURCES`（逗號分隔的 source_id）可在某個部署上
+關掉個別來源，不必改 sources.yaml。用途是雲端展示站台因授權或連外限制
+不宜抓取某來源時，只關那一站，排程主機與本機不受影響。
+
 **冷啟動的提升行為**：雲端首次開啟時 `data/swx_parquet` 是空的，
 `data_dir()` 會退回 `data/demo` 示範快照。本模組一律寫入**真實的 data/ 目錄**，
 因此第一次成功更新後，`data_dir()` 就會改回 `data/`、DEMO 橫幅自動消失。
@@ -20,6 +24,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -48,6 +53,17 @@ def live_data_root() -> Path:
     return project_root() / "data"
 
 
+def disabled_sources() -> frozenset[str]:
+    """由環境變數停用的來源（逗號分隔的 source_id）。
+
+    設這個開關的理由是**部署層與程式碼要能分開**：雲端展示站台若因授權、
+    法遵或連外限制而不該抓某個來源，應該在該站台的環境設定裡關掉，
+    而不是改 sources.yaml——後者會同時關掉排程主機與本機開發環境。
+    """
+    raw = os.getenv("SWX_DISABLE_SOURCES", "")
+    return frozenset(x.strip() for x in raw.split(",") if x.strip())
+
+
 def live_sources(*, include_heavy: bool = False) -> list[str]:
     """自動更新納入的來源。
 
@@ -55,7 +71,8 @@ def live_sources(*, include_heavy: bool = False) -> list[str]:
     （其中 nlsc_egnss_i95 約 3–4 秒：一頁 HTML 加三張圖表），
     加上 gfz_hp30 則增為約 74 秒——後者不適合放在頁面載入路徑上。
     """
-    skip = EXCLUDE_FROM_REFRESH - (HEAVY_SOURCES if include_heavy else frozenset())
+    skip = (EXCLUDE_FROM_REFRESH - (HEAVY_SOURCES if include_heavy else frozenset())
+            ) | disabled_sources()
     return [s.source_id for s in catalog().ready() if s.source_id not in skip]
 
 
@@ -114,10 +131,37 @@ class RefreshResult:
     failed: list[tuple[str, str]] = field(default_factory=list)
     rows_written: int = 0
     elapsed_s: float = 0.0
+    #: 逐來源寫入列數。成功但寫 0 列與根本沒跑是兩件事，畫面上必須分得出來。
+    rows: dict[str, int] = field(default_factory=dict)
+    #: 逐來源的部分成功說明（如 e-GNSS 三個網只抓到兩個）。
+    warnings: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    #: 本次納入的來源清單。不在其中即代表**根本沒去抓**，
+    #: 與「抓了但失敗」要用不同的話說——前者去看設定，後者去看網路。
+    attempted: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
         return self.ran and bool(self.succeeded)
+
+    def status_of(self, source_id: str) -> tuple[str, str]:
+        """單一來源在本次更新中的下場，回傳 (狀態碼, 人話)。
+
+        狀態碼：ok／empty／failed／skipped／not_run。
+        """
+        if not self.ran:
+            return "not_run", f"未執行更新（{self.reason}）"
+        for sid, err in self.failed:
+            if sid == source_id:
+                return "failed", err
+        if source_id in self.succeeded:
+            note = "；".join(self.warnings.get(source_id, ()))
+            rows = self.rows.get(source_id, 0)
+            if rows == 0:
+                return "empty", note or "擷取成功但沒有新資料寫入"
+            return "ok", note or f"寫入 {rows} 列"
+        if source_id not in self.attempted:
+            return "skipped", "未納入本次自動更新"
+        return "not_run", "本次更新未涵蓋"
 
     def summary(self) -> str:
         if not self.ran:
@@ -162,14 +206,19 @@ def refresh_if_stale(
                                         else f"資料齡期 {age / 60:.0f} 分鐘，已逾時"),
     )
 
+    result.attempted = list(ids)
+
     for i, source_id in enumerate(ids, 1):
         if on_progress is not None:
             on_progress(i, len(ids), source_id)
         try:
             outcome = run_source(source_id, store)
+            if outcome.warnings:
+                result.warnings[source_id] = tuple(outcome.warnings)
             if outcome.ok:
                 result.succeeded.append(source_id)
                 result.rows_written += outcome.written
+                result.rows[source_id] = outcome.written
             else:
                 result.failed.append((source_id, outcome.error or "未知錯誤"))
         except Exception as exc:      # noqa: BLE001 — 單一來源失敗不得中斷整體
@@ -195,6 +244,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"最近入庫　{last or '（無資料）'}")
         print(f"資料齡期　{'—' if age is None else f'{age / 60:.1f} 分鐘'}")
         print(f"納入更新的來源（{len(live_sources())}）：{', '.join(live_sources())}")
+        off = disabled_sources()
+        if off:
+            print(f"由 SWX_DISABLE_SOURCES 停用：{', '.join(sorted(off))}")
         return 0
 
     result = refresh_if_stale(max_age_s=args.max_age_min * 60.0, force=args.force,

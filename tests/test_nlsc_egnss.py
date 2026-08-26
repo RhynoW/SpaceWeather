@@ -109,8 +109,13 @@ def test_missing_threshold_lines_yield_nothing():
     assert extract_i95(buf.getvalue()) == {}
 
 
-def test_chart_urls_are_mapped_to_network_names():
-    """圖檔的報表編號要對應到網別；對不上就無法分網儲存。"""
+def test_network_comes_from_the_filename_not_the_rotating_report_number():
+    """報表編號會輪替，網別必須取自檔名中的網別代號。
+
+    實測 2026-08-19 的編號是 22／24／25，08-26 已變成 26／28／29。
+    若以編號對應網別，換號那天不會報錯，只會把某一網的值標成另一網
+    ——而分網儲存的全部目的，就是不讓三個網互相污染。
+    """
     from swx_core import SourceSpec, SwxStore
 
     from services.ingest.nlsc_egnss import NlscEgnssConnector
@@ -120,13 +125,13 @@ def test_chart_urls_are_mapped_to_network_names():
         status="ready", provides=("I95",), cadence_s=3600, latency_budget_s=None,
         endpoint="https://example.invalid/rtkstatus.aspx", fmt="nlsc_egnss_html",
         local_fallback=None, fallback=(), notes=None, publication_lag_s=0,
-        raw={"networks": {"22": "RTKVRSNet", "25": "Peng_Hu"}},
+        raw={},
     )
     html = (
         '<img src="NFS/Pivot_Reports/Year.26/Month.Aug/Day.26/'
-        '22_i95__RTKVRSNet_RTCM31_20260825235942%20-%2020260826235942.jpg">'
+        '26_i95__RTKVRSNet_RTCM31_20260825235942%20-%2020260826235942.jpg">'
         '<img src="NFS/Pivot_Reports/Year.26/Month.Aug/Day.26/'
-        '25_i95__Peng_Hu_RTCM31_20260825235942%20-%2020260826235942.jpg">'
+        '29_i95__Peng_Hu_RTCM31_20260825235942%20-%2020260826235942.jpg">'
     ).encode()
 
     conn = NlscEgnssConnector(spec, SwxStore.__new__(SwxStore))

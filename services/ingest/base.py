@@ -48,8 +48,18 @@ class _RelaxedStrictAdapter(requests.adapters.HTTPAdapter):
         return super().init_poolmanager(*args, **kwargs)
 
 
+#: 對外自我介紹。預設的 python-requests/x.y 不說明「誰在抓、為什麼」，
+#: 資料提供者只能把它當成不明流量——尤其在授權尚在申請中的來源上，
+#: 讓對方看得出是誰、找得到人，是取得授權的一部分，不是可有可無的禮貌。
+USER_AGENT = (
+    "SWX-SDA/0.1 (space-weather to SDA research prototype; "
+    "contact via https://github.com/RhynoW/SpaceWeather)"
+)
+
+
 def _session_for(spec: SourceSpec) -> requests.Session:
     sess = requests.Session()
+    sess.headers["User-Agent"] = USER_AGENT
     if bool(spec.raw.get("tls_relaxed_strict", False)):
         sess.mount("https://", _RelaxedStrictAdapter())
     return sess

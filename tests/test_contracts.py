@@ -365,6 +365,55 @@ def test_heavy_sources_excluded_from_auto_refresh():
     assert set(live_sources(include_heavy=True)) >= auto | HEAVY_SOURCES
 
 
+def test_i95_is_in_the_auto_refresh_path():
+    """e-GNSS I95 必須留在自動更新裡——它沒有回填管道。
+
+    目錄列表被 WAF 阻擋、歷史檔名不可推測，漏掉的時段事後補不回來。
+    任何把它移出自動更新的改動，都會安靜地在歷史序列上挖一個永久的洞。
+    """
+    from services.ingest.refresh import live_sources
+
+    assert "nlsc_egnss_i95" in live_sources(), "I95 已不在自動更新路徑上"
+
+
+def test_disable_switch_is_per_deployment(monkeypatch):
+    """單一站台可停用來源，且不必改 sources.yaml。
+
+    雲端展示站台與排程主機共用同一份設定檔；用設定檔關來源會兩邊一起關。
+    """
+    from services.ingest import refresh as R
+
+    assert "nlsc_egnss_i95" in R.live_sources()
+    monkeypatch.setenv("SWX_DISABLE_SOURCES", "nlsc_egnss_i95, cwa_swoo")
+    assert R.disabled_sources() == {"nlsc_egnss_i95", "cwa_swoo"}
+    after = set(R.live_sources())
+    assert "nlsc_egnss_i95" not in after and "cwa_swoo" not in after
+    assert "swpc_xray" in after, "停用開關波及了其他來源"
+
+
+def test_refresh_result_distinguishes_why_a_source_has_no_data():
+    """「沒有資料」的五種成因不得混為一談。
+
+    抓失敗要去看網路、沒納入要去看設定、抓到但空的要去看對方版面——
+    畫面只說「目前沒有資料」的話，值勤的人無從判斷該找誰。
+    """
+    from services.ingest.refresh import RefreshResult
+
+    r = RefreshResult(ran=True, reason="強制更新",
+                      attempted=["a", "b", "c"],
+                      succeeded=["a", "b"], failed=[("c", "SSLError: bad chain")],
+                      rows={"a": 12, "b": 0},
+                      warnings={"a": ("Peng_Hu 的 I95 未取得（HTTPError）",)})
+
+    assert r.status_of("a")[0] == "ok"
+    assert "Peng_Hu" in r.status_of("a")[1], "部分成功的說明被吞掉"
+    assert r.status_of("b")[0] == "empty"
+    assert r.status_of("c") == ("failed", "SSLError: bad chain")
+    assert r.status_of("d")[0] == "skipped"
+
+    assert RefreshResult(ran=False, reason="資料齡期 5 分鐘").status_of("a")[0] == "not_run"
+
+
 # ── 動畫來源 ────────────────────────────────────────────────────────────
 def test_every_animation_has_attribution_and_valid_kind():
     from swx_core import animations

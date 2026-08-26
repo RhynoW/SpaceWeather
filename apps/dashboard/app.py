@@ -436,6 +436,33 @@ def start_refresh(*, force: bool = False, include_heavy: bool = False) -> bool:
     return True
 
 
+def source_refresh_note(source_id: str) -> tuple[str, str]:
+    """某來源在最近一次自動更新中的下場，回傳 (狀態碼, 人話)。
+
+    「畫面上沒有這筆資料」至少有五種成因，該找的人完全不同：
+
+      running   還在抓——等一下重新整理就有
+      skipped   沒納入更新——去看設定（status、SWX_DISABLE_SOURCES）
+      failed    抓了但失敗——去看網路、憑證、對方站台
+      empty     抓到了但沒有可用資料——去看解析規則或對方版面
+      ok        抓到了卻仍查不到——去看查詢窗與 grid_id
+
+    把它們混成一句「目前沒有資料」，等於要看畫面的人自己猜。雲端站台尤其如此：
+    那裡沒有終端機可以下指令，畫面說不出原因就沒有第二條線索。
+    """
+    state = _refresh_state()
+    thread = state.get("thread")
+    if thread is not None and thread.is_alive():
+        prog = state.get("progress")
+        return "running", (f"更新中（{prog[0]}/{prog[1]}　{prog[2]}）" if prog else "更新中")
+    if state.get("error"):
+        return "failed", str(state["error"])
+    result = state.get("result")
+    if result is None:
+        return "not_run", "本站台自本次啟動後尚未執行自動更新"
+    return result.status_of(source_id)
+
+
 def refresh_status_line() -> None:
     """側欄顯示資料齡期與更新狀態，並提供手動更新。"""
     from services.ingest.refresh import data_age_s, live_sources
@@ -1220,11 +1247,31 @@ elif page == "RTK 現場查核":
         return "L0", "低於警戒值"
 
     if i95.empty:
+        # 空白必須說出成因。這一頁在雲端站台上沒有終端機可用，
+        # 畫面不講原因，值勤的人就只能猜「是還沒抓、抓失敗、還是抓到了沒資料」。
+        state, detail = source_refresh_note("nlsc_egnss_i95")
+        WHY = {
+            "running": ("**正在擷取 I95。**", "稍候重新整理本頁即可。"),
+            "skipped": ("**本站台未擷取 I95。**",
+                        "來源未納入自動更新——請確認 `sources.yaml` 的 "
+                        "`nlsc_egnss_i95` 為 `ready`，且環境變數 "
+                        "`SWX_DISABLE_SOURCES` 未包含它。"),
+            "failed": ("**I95 擷取失敗。**",
+                       "多半是連外受限（對方站台的 WAF 會拒絕非預期的來源位址）"
+                       "或憑證鏈問題。本機可執行 `python tools/i95_smoke.py` 對照。"),
+            "empty": ("**I95 擷取成功，但沒有取到數值。**",
+                      "官方只以圖表發布，這通常代表**版面已改版**，"
+                      "或當下三個網的圖都尚未產生。"),
+            "ok": ("**I95 已擷取，但查詢窗內沒有落點。**",
+                   "近 2 日內沒有資料——可能是對方站台停更。"),
+            "not_run": ("**本站台尚未執行自動更新。**",
+                        "側欄按「更新」，或等待開站時的背景更新完成。"),
+        }
+        head, hint = WHY.get(state, WHY["not_run"])
         st.info(
-            "**目前沒有 I95 資料。** 來源 `nlsc_egnss_i95` 已納入自動更新，"
-            "此處空白代表尚未擷取成功或本機資料目錄尚未更新——"
-            "執行 `python tools/i95_smoke.py` 可確認端點與版面。\n\n"
-            "在此之前，本頁下方的矩陣與查核表仍可使用；"
+            f"{head} {hint}\n\n"
+            f"最近一次自動更新對 `nlsc_egnss_i95` 的結果：**{state}** — {detail}\n\n"
+            "本頁下方的矩陣與查核表不依賴 I95，仍可使用；"
             "地磁與閃焰等間接判據見「值勤模式」頁，但**間接判據不足以判斷 RTK 可否作業**"
             "（2026-08-26 實測：Kp≤0.67 的平靜日，I95 仍整個下午超過警戒值）。"
         )
@@ -1547,6 +1594,36 @@ elif page == "資料健康":
                   "n_rows", "good_rate", "degraded"]],
             hide_index=True, width='stretch',
         )
+
+    st.divider()
+    st.subheader("最近一次自動更新")
+    # 上面那張表只看得到**有寫進資料層**的通道：一個從頭到尾抓失敗的來源
+    # 在那裡是完全隱形的。缺資料最常見的原因恰好就是它，所以另外列一張。
+    from services.ingest.refresh import disabled_sources, live_sources
+
+    _state = _refresh_state()
+    _result = _state.get("result")
+    _running = (_state.get("thread") is not None and _state["thread"].is_alive())
+    if _running:
+        st.info("背景更新執行中，下表為上一輪結果。")
+    if _result is None:
+        st.caption("本站台自本次啟動後尚未執行自動更新（側欄可手動觸發）。")
+    else:
+        STATE_ICON = {"ok": "✅", "empty": "⚪", "failed": "❌",
+                      "skipped": "⏸", "not_run": "—"}
+        rows = []
+        for sid in sorted(set(_result.attempted) | {s.source_id for s in catalog().ready()}):
+            st_code, detail = _result.status_of(sid)
+            rows.append({"來源": sid, "狀態": f"{STATE_ICON.get(st_code, '')} {st_code}",
+                         "說明": detail})
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width='stretch')
+        st.caption(f"上次更新：{_result.summary()}")
+    _off = disabled_sources()
+    if _off:
+        st.warning("本站台以環境變數 `SWX_DISABLE_SOURCES` 停用："
+                   + "、".join(sorted(_off)))
+    st.caption(f"納入自動更新的來源共 {len(live_sources())} 個。"
+               "未列入者為重量級歷史來源（見 services/ingest/refresh.py）或狀態非 ready。")
 
     st.divider()
     st.subheader("資料源盤點")
