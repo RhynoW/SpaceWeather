@@ -45,3 +45,9 @@ out/
 /SWxScale.json
 /get_web_*.json
 data/raw/cwa_swoo/
+
+# e-GNSS I95：授權申請中（經夏漢民太空中心向國土測繪中心提出）。
+# 原始圖表與衍生數值在核准前不進公開版控。data/ 已整體排除，此處為明示。
+data/raw/nlsc_egnss_i95/
+data/swx_parquet/I95/
+data/demo/swx_parquet/I95/

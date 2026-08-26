@@ -100,7 +100,7 @@ python -m services.ingest.run --source all --backfill   # 首次：回填歷史�
 python -m services.ingest.run --source omni2_hourly --years 6
 # Hp30 例行只解析近 120 天；1 小時預報要訓練資料，需回填歷史（不重抓，改解析既有原始檔）
 python -m services.ingest.run --source gfz_hp30 --reparse --window-days 2100 --backfill
-# e-GNSS I95（來源為 planned，不納入自動更新；連線與版面檢查用）
+# e-GNSS I95 連線與版面檢查（已納入自動更新；此工具用於外部端點改版時定位問題）
 python tools/i95_smoke.py   # 預報引擎的訓練資料
 
 # 2. 端到端演練：資料 → 分級 → 事件卡 → STK 檔 → 密度修正因子
@@ -152,7 +152,7 @@ pip install -r requirements.lock   # 重現本文數字時使用
 
 | 層 | 模組 | 狀態 |
 |---|---|---|
-| 擷取層 | `services/ingest` | ✅ 23 個來源（19 個可運作）：CelesTrak、GFZ ×2、SWPC ×9、Kyoto、NASA OMNI2、**中央氣象署 SWOO**、**福衛七號 TACC ×2**（閃爍 `scn1c2`、精密定軌 `leoOrb`）。其中 15 個納入背景自動更新 |
+| 擷取層 | `services/ingest` | ✅ 23 個來源（20 個可運作）：CelesTrak、GFZ ×2、SWPC ×9、Kyoto、NASA OMNI2、**中央氣象署 SWOO**、**福衛七號 TACC ×2**（閃爍 `scn1c2`、精密定軌 `leoOrb`）、**國土測繪中心 e-GNSS I95**。其中 16 個納入背景自動更新 |
 | 資料層 | `packages/swx_core` | ✅ 雙時間軸 Parquet + DuckDB、品質三級制、48 個註冊參數 |
 | 模型層 | `packages/orbit_drag`、`packages/geomag` | ✅ 熱氣層密度／阻力（MSIS 2.1，暴時 ap 模式）＋地磁基準場（IGRF-14）＋TEME↔ITRF 框架轉換（含 EOP，對 astropy 8.0.1 驗證至 0.08 m）；電離層 D 層吸收已接 |
 | 預報層 | `services/forecast` | ⚠️ **功能覆蓋** 兩組目標：Kp（3 小時格點，3–48 h）與 **Hp30（30 分鐘格點，1／3／6 h）**，後者提供構想書要求的 1 小時產品；驗證擂台含命中率、誤警率、**提前量**與可信度四項 KPI。**任何 horizon 皆非正式作業產品**；Hp30 1 h 與 Kp 3–12 h 可作研究參考，**>12 h 為非作業性研究預報**（與 API 的 `not_for_operational_use_beyond_h: 12` 一致） |
@@ -639,7 +639,7 @@ python tools/make_source_list.py     # → docs/SpaceWeather資料來源清單YY
 |---|---|---|
 | CelesTrak CSSI SW-All | F10.7、Kp、ap、Ap、ISN、Cp、C9 | ✅ 2021→2041（含月預測） |
 | GFZ Kp nowcast | Kp、ap、F10.7、SN | ✅ 備援兼近即時 |
-| **e-GNSS I95**（國土測繪中心） | 基準站網電離層誤差指標，分本島 VRS／金門／澎湖三網 | ◐ 連接器已實作並實測可連線；**使用條款待確認**，故 `status=planned`。官方僅以圖表發布，數值由圖表擷取（非官方衍生值） |
+| **e-GNSS I95**（國土測繪中心） | 基準站網電離層誤差指標，分本島 VRS／金門／澎湖三網 | ✅ 已納入自動更新（實測 3–4 秒）。**授權申請中**（經夏漢民太空中心）。官方僅以圖表發布，數值由圖表擷取，標 `suspect`／tier 2 |
 | GFZ Hp30／ap30 | 30 分鐘地磁指數 | ✅ 提升暴起始時刻解析度；**1 小時預報的目標變數**（例行只解析近 120 天，訓練用歷史以 `--reparse --window-days` 回填） |
 | SWPC GOES X-ray | 0.05–0.4 / 0.1–0.8 nm 通量 | ✅ |
 | SWPC GOES 閃焰事件 | 閃焰起訖時間與 A–X 分級 | ✅ |
@@ -661,10 +661,11 @@ python tools/make_source_list.py     # → docs/SpaceWeather資料來源清單YY
 
 「可運作」的定義：`configs/sources.yaml` 標 `status: ready`，且在最近一次
 `python -m services.ingest.run --source all` 中完成**連線 → 解析 → 品質標記 → 入庫**
-全程無錯誤。19 個可運作來源中有 **15 個納入背景自動更新**；
+全程無錯誤。20 個可運作來源中有 **16 個納入背景自動更新**；
 `gfz_hp30`（單獨約 46 秒）與 `omni2_hourly`（六年歷史回填）排除於頁面載入路徑外，
 改由手動「完整」按鈕或排程主機處理。未列於上表而標 `planned` 的 3 個來源為 `tw_gnss_tec`、
 `tw_magnetometer`、`tw_ionosonde`，皆屬需機關協調項。
+`nlsc_egnss_i95` 標 `ready` 並已納入自動更新，但**授權仍在申請中**（經夏漢民太空中心協助向國土測繪中心提出）——先輪詢是因為它**沒有回填管道**，晚一天就少一天；核准前其原始圖檔與衍生數值不進公開版控，也不放進 `data/demo`。
 
 執行期另有 `degraded` 狀態：來源可取得但資料齡期超過 `latency_budget_s`，
 於 `/v1/health/data` 與儀表板「資料健康」頁標示。**來源存在不等於資料可用。**
@@ -983,7 +984,7 @@ python -m services.ingest.refresh --max-age-min 60  # 逾時才更新
 python -m services.ingest.refresh --force --full    # 強制，含重量級來源
 ```
 
-側欄顯示齡期與更新進度，並提供「更新」（15 個快速來源，約 30–50 秒）
+側欄顯示齡期與更新進度，並提供「更新」（16 個快速來源，約 33–55 秒）
 與「完整」（另含 `gfz_hp30`）兩個按鈕。更新一律寫入**真實的 `data/` 目錄**，
 因此雲端首次成功更新後，示範快照的 DEMO 橫幅會自動消失。
 
