@@ -32,6 +32,7 @@ from .swpc_json import SwpcJsonConnector
 from .swpc_solar import SwpcFlareConnector, SwpcSolarRegionsConnector
 from .omni import OmniConnector
 from .geomag_sources import GfzHp30Connector, SwpcOvationConnector
+from .nlsc_egnss import NlscEgnssConnector
 from .forecast_sources import (
     KyotoDstConnector,
     Swpc27DayOutlookConnector,
@@ -56,6 +57,7 @@ CONNECTORS: tuple[type[Connector], ...] = (
     OmniConnector,
     GfzHp30Connector,
     SwpcOvationConnector,
+    NlscEgnssConnector,
 )
 
 

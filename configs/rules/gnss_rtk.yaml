@@ -1,0 +1,139 @@
+# L0–L4 分級規則：RTK／VBS-RTK 高精度定位網域（架構書 §9.1）
+#
+# 這個網域與 GNSS_PNT 分開，因為**驅動量不同**。一般定位在意的是絕對電離層
+# 延遲（TEC），RTK 在意的是基準站與流動站之間的**差分**延遲——雙差把共同誤差
+# 消掉，剩下的空間梯度殘差才是整數模糊度固定失敗的原因。TEC 高不必然難固定，
+# TEC 梯度大才難固定。
+#
+# **本檔的門檻全部引用作業單位公告值，本案不自創。** e-GNSS 的 I95 是目前
+# 唯一有官方公告判讀標準的判據，這正是它的價值；改動門檻等於放棄那個背書。
+#
+# 一個實測佐證（2026-08-26，見 docs/rtk_ionosphere.md）：當日 Kp 為
+# 0.00／0.33／0.67／0.67——地磁完全平靜，而 I95 自 04Z 起全程超過警戒值 8，
+# 10–11Z 達 20.7。也就是說 **GNSS_PNT 的 Kp≥5 代理判據當天完全不會觸發**。
+# 低緯度 RTK 的主導因素是赤道異常的日變化，不是磁暴；磁暴讓它更糟，
+# 但沒有磁暴它照樣天天超過警戒值。這是本網域必須獨立存在的理由。
+
+domain: GNSS_RTK
+version: 2026.1-draft
+# I95 三段門檻為官方公告值，故該部分視為已校準；閃爍條款仍未與需求單位校準。
+calibrated: false
+
+# 門檻出處（測試 test_rtk_thresholds_cite_their_source 會檢查此區塊存在且完整）
+threshold_sources:
+  I95:
+    authority: 內政部國土測繪中心 e-GNSS 即時動態定位系統
+    url: https://egnss.nlsc.gov.tw/rtkstatus.aspx
+    statement: >
+      官方判讀建議：I95 超過警戒值（High Activity）8 但穩定低於 20 者仍為可作業時段；
+      超過 20 但低於 30 者，建議在作業環境良好地區仍可嘗試 VBS-RTK；
+      持續超過 30 以上時，建議避開該時段作業。
+    values: [8, 20, 30]
+    note: >
+      圖表另標 PIVOT 自帶的三條帶（Normal 2／Medium 4／High 8）。
+      本案僅採作業判讀用的 8／20／30，不引用 2／4——後兩者是活動度分帶，
+      不是作業建議。
+  S4:
+    authority: 本案自訂（沿用 GNSS_PNT 之 GNSS-L3-SCINT）
+    url: docs/forecast_verification.md
+    statement: 閃爍門檻尚未與在地實測校準，僅供研究參考。
+    values: [0.6]
+    note: 福衛七號為掩星觀測，切點幾何不等於地面站對衛星的視線，不可直接當在地閃爍值。
+
+# 服務與設備因素：**排除這六項之前不得歸因於太空天氣**（構想書議題五）。
+# 反向亦然——I95 高的時候不該讓現場一路去查接收機設定。
+_service_exclusions: &service_exclusions
+  - e-GNSS 服務網狀態
+  - RTCM 差分電文是否持續接收
+  - NTRIP 延遲與差分資料 age
+  - Mountpoint 之 RTCM 版本與接收機是否相容
+  - 接收機支援之星系（GPS／Galileo／BeiDou／GLONASS）
+  - 遮蔽與多路徑環境
+
+rules:
+  # ── 網路 RTK（VBS）：以 I95 為主判據 ────────────────────────────────
+  - id: RTK-L1-I95-ALERT
+    name: I95 超過警戒值（可作業，需留意）
+    when:
+      any:
+        - {param: I95, op: ">=", value: 8.0, dwell_h: 0}
+    level: L1
+    hysteresis: {clear_below: 6.0, clear_dwell_h: 2}
+    impact: 電離層誤差進入官方警戒帶；固定時間可能拉長，環境不佳處固定率下降
+    action: 納入任務前提示；高精度作業預留較長固定時間，避免在遮蔽處作業
+    notify: [測量作業單位]
+    exclusions: *service_exclusions
+    requires_params: [I95]
+    # 分網判讀：本島 VRS 網。三個網的 I95 差異可以很大，本島的作業不該因為
+    # 澎湖網的尖峰被判為嚴重；金門／澎湖需各自的規則集（尚未建立）。
+    region: RTKVRSNet
+
+  - id: RTK-L2-I95-CAUTION
+    name: I95 20–30（僅環境良好地區可嘗試）
+    when:
+      any:
+        - {param: I95, op: ">=", value: 20.0, dwell_h: 0}
+    level: L2
+    hysteresis: {clear_below: 16.0, clear_dwell_h: 2}
+    impact: 官方建議僅在作業環境良好地區嘗試 VBS-RTK；一般環境固定率明顯下降
+    action: 通報作業單位；改在開闊地作業、延長觀測時間，或改期至 I95 較低時段
+    notify: [測量作業單位, 通信單位]
+    exclusions: *service_exclusions
+    requires_params: [I95]
+    # 分網判讀：本島 VRS 網。三個網的 I95 差異可以很大，本島的作業不該因為
+    # 澎湖網的尖峰被判為嚴重；金門／澎湖需各自的規則集（尚未建立）。
+    region: RTKVRSNet
+
+  - id: RTK-L3-I95-AVOID
+    name: I95 持續超過 30（建議避開該時段）
+    when:
+      any:
+        # 官方用語為「持續超過 30」，故要求持續 1 小時（I95 為逐時值）
+        - {param: I95, op: ">=", value: 30.0, dwell_h: 1}
+    level: L3
+    hysteresis: {clear_below: 25.0, clear_dwell_h: 2}
+    impact: 官方建議避開該時段作業；VBS 內插殘差過大，整數模糊度固定不可靠
+    action: 建議調整任務規劃，改期至 I95 較低時段；必要時改用靜態觀測後處理
+    notify: [測量作業單位, 通信單位, 任務規劃席]
+    exclusions: *service_exclusions
+    requires_params: [I95]
+    # 分網判讀：本島 VRS 網。三個網的 I95 差異可以很大，本島的作業不該因為
+    # 澎湖網的尖峰被判為嚴重；金門／澎湖需各自的規則集（尚未建立）。
+    region: RTKVRSNet
+
+  # ── 閃爍：與 I95 互補，機制不同 ──────────────────────────────────────
+  # I95 量的是空間梯度（差分殘差），閃爍造成的是**載波失鎖與週跳**。
+  # 兩者可以各自單獨發生：平順但陡的梯度不一定伴隨閃爍，
+  # 而電漿泡造成的閃爍在 I95 平均值上可能不明顯。
+  - id: RTK-L3-SCINT
+    name: 電離層閃爍導致失鎖（實測）
+    when:
+      any:
+        - {param: S4, op: ">=", value: 0.6, dwell_h: 0.25}
+        - {param: ROTI, op: ">=", value: 0.8, dwell_h: 0.25}
+    level: L3
+    hysteresis: {clear_below: 0.45, clear_dwell_h: 0.5}
+    impact: 載波相位週跳與失鎖增加；已固定解可能反覆失效，重新初始化頻繁
+    action: 延後高精度作業；改用多頻多星系接收；必要時改採靜態後處理
+    notify: [測量作業單位, 衛星地面站]
+    exclusions: *service_exclusions
+    requires_params: [S4, ROTI]
+
+  # ── 間接判據：僅在 I95 不可得時提供背景 ──────────────────────────────
+  # 刻意壓在 L1 且標 proxy。2026-08-26 的實測已顯示地磁指數對低緯度 RTK
+  # 的解釋力有限——磁暴期間確實更糟，但平靜日的 I95 照樣超標，
+  # 故此規則只能當「更糟」的加註，不能當 RTK 風險的主要依據。
+  - id: RTK-L1-STORM-PROXY
+    name: 地磁擾動期間 RTK 風險（間接推估）
+    when:
+      any:
+        - {param: KP_3H, op: ">=", value: 5.0, dwell_h: 0}
+    level: L1
+    hysteresis: {clear_below: 4.0, clear_dwell_h: 6}
+    impact: >
+      暴時行進式電離層擾動（TID）與梯度增強，固定率可能下降。
+      **無 I95 實測時不得據此宣稱作業可行**——平靜日 I95 亦常超過警戒值。
+    action: 高精度作業預留額外時間；優先取得 I95 實測再做判斷
+    notify: [測量作業單位]
+    exclusions: *service_exclusions
+    inference: proxy

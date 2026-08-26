@@ -477,6 +477,19 @@ params:
     cadence_s: 900
     impacts: [GNSS_PNT, VHF_UHF, SATCOM]
     status: ready
+  - code: I95
+    name_zh: 電離層誤差指標 I95
+    name_en: Ionospheric index I95
+    # 單位待與國土測繪中心確認：PIVOT 的 I95 為網內電離層殘差的 95 百分位
+    # 指標值，圖表未標單位。門檻採官方公告值，故單位未確認不影響判讀。
+    unit: "1"
+    domain: iono
+    valid_min: 0.0
+    # 上界取寬：2026-08-26 澎湖網一度出現 46，單一網的短時尖峰可以很高
+    valid_max: 100.0
+    cadence_s: 3600
+    impacts: [GNSS_PNT, GNSS_RTK]
+    status: planned
   - code: FOF2
     name_zh: F2 層臨界頻率
     name_en: foF2
@@ -534,6 +547,7 @@ params:
 impact_domains:
   ORBIT_PREDICTION: 軌道預報與碰撞分析
   GNSS_PNT: GNSS 定位導航授時
+  GNSS_RTK: RTK／VBS-RTK 高精度定位（整數模糊度固定）
   HF_COMM: HF 通信
   VHF_UHF: VHF/UHF 通信
   SATCOM: 衛星通信（S/X/Ka）

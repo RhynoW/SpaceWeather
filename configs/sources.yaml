@@ -439,6 +439,41 @@ sources:
     cadence_s: 300
     notes: 需與 TASA／中央氣象署協調（架構書 C2，高風險項）。
 
+  - source_id: nlsc_egnss_i95
+    name: e-GNSS 電離層誤差指標 I95（內政部國土測繪中心）
+    connector: nlsc_egnss
+    tier: 1
+    attribution:
+      provider: '內政部國土測繪中心 e-GNSS 即時動態定位系統'
+      product: 'PIVOT 由基準站網觀測算出之電離層誤差指標 I95（本島 VRS 網／金門／澎湖，逐時）'
+      url: 'https://egnss.nlsc.gov.tw/rtkstatus.aspx'
+      terms: '**使用條款與取得方式待確認**。公開頁面以圖表發布，本案尚未取得數值資料授權；
+              取得前不得將原始圖檔或衍生數值提交至公開版控。引用時須標註國土測繪中心為資料產製者'
+    status: planned
+    provides: [I95]
+    cadence_s: 3600
+    latency_budget_s: 7200
+    publication_lag_s: 3600
+    endpoint: https://egnss.nlsc.gov.tw/rtkstatus.aspx
+    format: nlsc_egnss_html
+    # 憑證鏈與 CWA SWOO 同源問題：標準驗證回 CERTIFICATE_VERIFY_FAILED。
+    # **憑證鏈與主機名仍完整驗證**，僅放寬 X.509 STRICT 的擴充欄位一致性檢查。
+    tls_relaxed_strict: true
+    networks:                     # 圖檔檔名中的報表編號 → 網別
+      "22": RTKVRSNet             # 臺灣本島 VRS 網
+      "24": Kinmen                # 金門
+      "25": Peng_Hu               # 澎湖
+    notes: >
+      **I95 是本案唯一有作業單位公告門檻的判據**（>8 警戒、20–30 環境良好可嘗試、
+      持續 >30 應避開），門檻一律引用官方值，本案不自創。
+      三個網的值差異可以很大（2026-08-26 00Z 澎湖 46、本島 4），故分網儲存於
+      `grid_id`，不得取全國單一值。
+      **取得方式的限制**：官方僅以 PIVOT 產生的 JPG 圖表發布，無數值端點；
+      目錄列表被 WAF 阻擋、歷史檔名不可推測，因此**沒有回填管道**，
+      歷史只能自開始輪詢之日起累積。連接器由圖表擷取數值，屬**非官方衍生值**，
+      一律標 quality_flag=suspect 並於事件卡標示。status 維持 planned：
+      連接器已實作並實測可連線，待使用條款確認後改 ready 即納入自動更新。
+
   - source_id: tw_magnetometer
     name: 臺灣周邊磁力計站
     connector: null

@@ -20,6 +20,9 @@ scipy>=1.11
 # 預報引擎
 scikit-learn>=1.4
 
+# 圖表擷取（e-GNSS I95 只以 JPG 發布，無數值端點）
+Pillow>=10.0
+
 # 儀表板
 streamlit>=1.40
 plotly>=5.20
