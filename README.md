@@ -152,10 +152,10 @@ pip install -r requirements.lock   # 重現本文數字時使用
 
 | 層 | 模組 | 狀態 |
 |---|---|---|
-| 擷取層 | `services/ingest` | ✅ 23 個來源（20 個可運作）：CelesTrak、GFZ ×2、SWPC ×9、Kyoto、NASA OMNI2、**中央氣象署 SWOO**、**福衛七號 TACC ×2**（閃爍 `scn1c2`、精密定軌 `leoOrb`）、**國土測繪中心 e-GNSS I95**。其中 16 個納入背景自動更新 |
+| 擷取層 | `services/ingest` | ✅ 24 個來源（21 個可運作）：CelesTrak、GFZ ×2、SWPC ×9、Kyoto、NASA OMNI2、**中央氣象署 SWOO**、**福衛七號 TACC ×2**（閃爍 `scn1c2`、精密定軌 `leoOrb`）、**國土測繪中心 e-GNSS I95**。其中 17 個納入背景自動更新 |
 | 資料層 | `packages/swx_core` | ✅ 雙時間軸 Parquet + DuckDB、品質三級制、48 個註冊參數 |
 | 模型層 | `packages/orbit_drag`、`packages/geomag` | ✅ 熱氣層密度／阻力（MSIS 2.1，暴時 ap 模式）＋地磁基準場（IGRF-14）＋TEME↔ITRF 框架轉換（含 EOP，對 astropy 8.0.1 驗證至 0.08 m）；電離層 D 層吸收已接 |
-| 預報層 | `services/forecast` | ⚠️ **功能覆蓋** 兩組目標：Kp（3 小時格點，3–48 h）與 **Hp30（30 分鐘格點，1／3／6 h）**，後者提供構想書要求的 1 小時產品；驗證擂台含命中率、誤警率、**提前量**與可信度四項 KPI。**任何 horizon 皆非正式作業產品**；Hp30 1 h 與 Kp 3–12 h 可作研究參考，**>12 h 為非作業性研究預報**（與 API 的 `not_for_operational_use_beyond_h: 12` 一致） |
+| 預報層 | `services/forecast` | ⚠️ **功能覆蓋** 四組目標：Kp（3 小時格點，3–48 h）、**Hp30（30 分鐘格點，1／3／6 h）**（構想書要求的 1 小時產品）、以及 **F10.7 與 Ap（日格點，1–45 天）**——後兩者是軌道預測實際依賴的驅動量，只有連續型指標；驗證擂台含命中率、誤警率、**提前量**與可信度四項 KPI。**任何 horizon 皆非正式作業產品**；Hp30 1 h 與 Kp 3–12 h 可作研究參考，**>12 h 為非作業性研究預報**（與 API 的 `not_for_operational_use_beyond_h: 12` 一致） |
 | 風險層 | `services/risk_engine` | ✅ 4 網域 24 條規則、事件卡、作業狀態庫。新增 **GNSS_RTK**：門檻引用國土測繪中心 I95 公告值（8／20／30），是本案唯一有作業單位背書的判據 |
 | 產品層 | `services/exporter` | ✅ STK/GMAT CSSI 驅動檔、密度修正因子表 |
 | 展示層 | `services/api`、`apps/dashboard` | ✅ REST API＋Streamlit 儀表板（含值勤模式、影像頁、使用指南與四語 STEM 教學頁），端點與頁面集合由契約測試守住，且每頁以 AppTest 實跑驗證可渲染 |
@@ -173,6 +173,8 @@ pip install -r requirements.lock   # 重現本文數字時使用
 | L0–L4 分級 | 原型 | 駐留、遲滯、可用性行為測試 | 門檻未與需求單位校準（`calibrated: false`） | `tests/test_risk_engine.py` |
 | Kp 預報（3–48 h） | 研究階段 | 4 折滾動起報回測、基線比較、事件段提前量 | 未達 KPI；3–12 h 中位提前量為 0；未與 NOAA 官方預報同場比較 | `docs/forecast_verification.md` |
 | Hp30 預報（1／3／6 h） | 研究階段 | 同一擂台、5 折、含提前量 | 1 h 的 BSS 0.475、FAR 0.337 為全部組合最佳，但持續性基線 POD 更高（0.729 對 0.601）；6 h 中位提前量為負，屬事後偵測 | `docs/forecast_verification.md` |
+| **F10.7 預報（1–45 天）** | **不發布產品** | 4 折滾動起報、日格點、2021–2026 | 每個提前量都由 **Tier 0 持續性勝出**（1 天 MAE 7.7 → 45 天 31.5 sfu），依門檻不應上線；27 天處出現凹陷（太陽自轉） | `docs/forecast_verification.md` |
+| **Ap 預報（1–45 天）** | **不發布產品** | 同上 | 3 天以後誤差**不隨提前量成長**（7.15 → 7.25 nT）且由**氣候平均**勝出——該尺度的 Ap 預報實質上就是氣候值 | `docs/forecast_verification.md` |
 | 事件卡生命週期 | 原型 | `draft → issued → superseded` 轉移、禁止重複發布、發布者記入稽核軌跡 | 尚未接正式人工簽核流程；API 未回傳 `reviewed_by`／`reviewed_at` | `tests/test_event_lifecycle.py` |
 | 判定依據 `inference` | 已完成 | 四值列舉、永不為 null、網域取最弱項、無資料回 `unavailable` | 觀測／模型之分類依參數清單判定，非逐筆溯源 | `tests/test_event_lifecycle.py` |
 | IGRF 基準場 | 已完成 | **值域合理性檢查**（F/D/I 落在臺灣公認範圍、磁傾角隨緯度單調遞增） | **未與任一測站實測序列逐點比對**；區域擾動仍為推估 | `tests/test_geomag.py` |
@@ -228,7 +230,7 @@ packages/
   SOURCE_MAP.md          移入模組的來源與改動記錄
 services/
   ingest/                各來源介接器（設定驅動）
-  forecast/              短時預報引擎與驗證擂台（Kp 3–48 h／Hp30 1–6 h）
+  forecast/              預報引擎與驗證擂台（Kp 3–48 h／Hp30 1–6 h／F10.7 與 Ap 1–45 天）
   risk_engine/           分級規則引擎與事件卡
   exporter/              STK CSSI 檔、密度修正因子
   api/                   Flask REST API
@@ -433,7 +435,7 @@ NOAA 的 24 小時機率預報亦僅達約 50% 水準。
 - 成績檔放在 `docs/` 而非 `data/exports/`：它是**宣稱的證據**，
   必須與引用它的報告同進版控；`data/` 不進版控，雲端部署就讀不到。
 
-重跑：`python -m services.forecast.run --verify --target <kp|hp30> --write-summary`。
+重跑：`python -m services.forecast.run --verify --target <kp|hp30|f107|ap> --write-summary`。
 
 ### 密度修正因子（摘要）
 
@@ -640,6 +642,7 @@ python tools/make_source_list.py     # → docs/SpaceWeather資料來源清單YY
 | CelesTrak CSSI SW-All | F10.7、Kp、ap、Ap、ISN、Cp、C9 | ✅ 2021→2041（含月預測） |
 | GFZ Kp nowcast | Kp、ap、F10.7、SN | ✅ 備援兼近即時 |
 | **e-GNSS I95**（國土測繪中心） | 基準站網電離層誤差指標，分本島 VRS／金門／澎湖三網 | ✅ 已納入自動更新（實測 3–4 秒）。**授權申請中**（經夏漢民太空中心）。官方僅以圖表發布，數值由圖表擷取，標 `suspect`／tier 2 |
+| **SWPC 45 日 Ap／F10.7 預報** | 逐日驅動量預測，45 天 | ✅ **軌道預測實際依賴的量**，也是預報擂台上要打敗的作業基線。無回填管道（只發布當前一份），故實測成績自輪詢之日起累積 |
 | GFZ Hp30／ap30 | 30 分鐘地磁指數 | ✅ 提升暴起始時刻解析度；**1 小時預報的目標變數**（例行只解析近 120 天，訓練用歷史以 `--reparse --window-days` 回填） |
 | SWPC GOES X-ray | 0.05–0.4 / 0.1–0.8 nm 通量 | ✅ |
 | SWPC GOES 閃焰事件 | 閃焰起訖時間與 A–X 分級 | ✅ |
@@ -661,7 +664,7 @@ python tools/make_source_list.py     # → docs/SpaceWeather資料來源清單YY
 
 「可運作」的定義：`configs/sources.yaml` 標 `status: ready`，且在最近一次
 `python -m services.ingest.run --source all` 中完成**連線 → 解析 → 品質標記 → 入庫**
-全程無錯誤。20 個可運作來源中有 **16 個納入背景自動更新**；
+全程無錯誤。21 個可運作來源中有 **17 個納入背景自動更新**；
 `gfz_hp30`（單獨約 46 秒）與 `omni2_hourly`（六年歷史回填）排除於頁面載入路徑外，
 改由手動「完整」按鈕或排程主機處理。未列於上表而標 `planned` 的 3 個來源為 `tw_gnss_tec`、
 `tw_magnetometer`、`tw_ionosonde`，皆屬需機關協調項。
@@ -689,7 +692,7 @@ python tools/make_source_list.py     # → docs/SpaceWeather資料來源清單YY
 | 事件卡 | `events` | 事件卡全文與 SDA 介接 JSON、規則可用性 |
 | 太陽閃焰 | `flares` | 閃焰事件表、X 射線時序、D 層吸收 |
 | **RTK 現場查核** | `rtk` | I95 現況（分網）、兩類肇因查核表、模式 × 事件型態影響矩陣 |
-| 短時預報 | `forecast` | 兩組目標（Hp30 1／3／6 h、Kp 3–48 h）；預報值與該 horizon 的實測技巧（POD／FAR／提前量／可信度）並列 |
+| 短時預報 | `forecast` | 兩組地磁目標（Hp30 1／3／6 h、Kp 3–48 h）；預報值與該 horizon 的實測技巧（POD／FAR／提前量／可信度）並列。頁尾另有 **F10.7／Ap 的長提前量驗證**（1–45 天）與外部作業系統的量級對照 |
 | 地磁基準場 | `geomag` | IGRF 參考場、測站表、ΔH 推估、Hp30 解析度對比 |
 | 軌道與密度修正 | `density` | 密度修正倍率、STK 驅動檔下載 |
 | 資料健康 | `health` | 各通道齡期、品質旗標分布、資料源盤點 |
@@ -754,6 +757,8 @@ python -m services.forecast.run --verify                    # 全 horizon 驗證
 python -m services.forecast.run --verify --objective pod
 python -m services.forecast.run --predict --write           # 產生預報並寫入
 python -m services.forecast.run --verify --target hp30      # 1／3／6 h（30 分鐘格點）
+python -m services.forecast.run --verify --target f107      # 1–45 天（日格點，阻力驅動量）
+python -m services.forecast.run --verify --target ap
 python -m services.forecast.run --verify --write-summary    # 成績寫入 docs/forecast_skill.json
 python -m services.forecast.run --predict --target hp30     # 構想書要求的 1 小時產品
 
@@ -984,7 +989,7 @@ python -m services.ingest.refresh --max-age-min 60  # 逾時才更新
 python -m services.ingest.refresh --force --full    # 強制，含重量級來源
 ```
 
-側欄顯示齡期與更新進度，並提供「更新」（16 個快速來源，約 33–55 秒）
+側欄顯示齡期與更新進度，並提供「更新」（17 個快速來源，約 33–55 秒）
 與「完整」（另含 `gfz_hp30`）兩個按鈕。更新一律寫入**真實的 `data/` 目錄**，
 因此雲端首次成功更新後，示範快照的 DEMO 橫幅會自動消失。
 

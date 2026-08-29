@@ -107,6 +107,31 @@ def _skill_block(skill: dict, hkey: str | None, picker) -> dict:
     }
 
 
+def _publication_note(has_rows: bool, skill: dict, skill_models) -> str | None:
+    """沒有預報列時，說出是**哪一種**沒有。
+
+    兩種成因，處置完全不同：擂台由 Tier 0 基線勝出而刻意不發布（去看驗證報告），
+    與單純還沒跑過 --predict --write 或資料落後（去跑擷取）。
+    合併成一句「沒有預報」會讓呼叫端以為系統壞了，或反過來以為我們有產品。
+    """
+    if has_rows:
+        return None
+    horizons = (skill or {}).get("horizons") or {}
+    if horizons:
+        best_tiers = []
+        for entry in horizons.values():
+            best, _ = skill_models(entry)
+            if best is not None:
+                best_tiers.append(best.get("tier") or 0)
+        if best_tiers and all(t == 0 for t in best_tiers):
+            return ("本系統未發布此目標的預報值：驗證擂台在每個 horizon 都由 "
+                    "Tier 0 基線勝出，依門檻不應上線。"
+                    "skill 區塊仍為實測成績，可用於評估該驅動量的可預報性。")
+    return ("此視窗內沒有預報列。可能尚未執行 "
+            "`python -m services.forecast.run --predict --write`，"
+            "或觀測資料已落後逾 30 天。")
+
+
 def create_app(store: SwxStore | None = None) -> Flask:
     app = Flask(__name__)
     try:
@@ -235,7 +260,10 @@ def create_app(store: SwxStore | None = None) -> Flask:
         now = _now()
         # 視窗放寬到 30 天：資料落後時仍要看得到最後一批預報與它的錨點，
         # 空回應會被誤讀成「沒有風險」而非「資料沒更新」。
-        df = store.query([spec.code, spec.prob_code],
+        # 連續型目標沒有機率參數，prob_code 為 None——直接放進查詢清單
+        # 會查一個不存在的參數碼。
+        codes = [c for c in (spec.code, spec.prob_code) if c]
+        df = store.query(codes,
                          start=now - timedelta(days=30), end=now + timedelta(days=3),
                          as_of=_ts(request.args.get("as_of")))
         fcs = latest_forecast_batch(
@@ -248,8 +276,9 @@ def create_app(store: SwxStore | None = None) -> Flask:
         # 會還原成 2.92 小時，技巧查表就查不到——差幾分鐘讓整個 KPI 消失。
         issued = None if latest_obs is None else pd.Timestamp(latest_obs).floor(spec.grid)
 
-        prob = (fcs[fcs["param_code"] == spec.prob_code]
-                .set_index("valid_time")["value"].to_dict()) if not fcs.empty else {}
+        prob = ({} if (spec.prob_code is None or fcs.empty) else
+                fcs[fcs["param_code"] == spec.prob_code]
+                .set_index("valid_time")["value"].to_dict())
 
         skill = load_skill().get("targets", {}).get(key, {})
         want = request.args.get("horizon")
@@ -278,6 +307,11 @@ def create_app(store: SwxStore | None = None) -> Flask:
             "param": spec.code,
             "grid": spec.grid,
             "storm_threshold": spec.storm_threshold,
+            # 有驗證成績不等於有作業產品。F10.7／Ap 的擂台結論是基線勝出，
+            # 依 Tier 0 門檻不發布本系統的預報值——此時 forecasts 為空，
+            # 而 skill 仍有內容。不講清楚會被讀成「資料還沒進來」。
+            "publishes_forecast": bool(rows),
+            "publication_note": _publication_note(bool(rows), skill, skill_models),
             "issued_utc": _iso_ts(issued),
             "issued_basis": f"latest_observation floored to {spec.grid}",
             "latest_observation_utc": _iso_ts(latest_obs),

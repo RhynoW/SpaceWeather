@@ -74,6 +74,29 @@ def test_cssi_field_positions_match_gmat_reader():
     assert cssi.LINE_WIDTH == 130
 
 
+def test_cssi_rejects_a_foreign_layout_that_claims_the_same_datatype():
+    """同一個 `DATATYPE CSSISpaceWeather VERSION 1.3`，欄位版面可能不同。
+
+    實例：COMSPOC（Spacebook）也發布這個格式的檔案，檔頭的 DATATYPE 與
+    VERSION 與 CelesTrak 完全一致，但它宣告的 FORTRAN 格式沒有 1X 分隔
+    （`I4,I3,I3,...`），實際行長 132 字元而非 130——**尾端五個 F6.1 欄位
+    整體位移 2 格**。
+
+    位移 2 格影響的是 F10.7 的 81 天平均，那是直接餵進大氣阻力模型的量。
+    這種檔案必須**被拒絕**，不得安靜地讀出一組合理但錯誤的數字。
+    本測試鎖住「大聲失敗」這個行為。
+    """
+    # 實測差異：F10.7 區塊前多一格空白，行尾再多一格 → 132 字元
+    shifted = CSSI_SAMPLE.replace(" 0  80.4", " 0   80.4") + " "
+    assert len(shifted) == 132, "測試素材未重現 COMSPOC 版面"
+
+    with pytest.raises(ValueError):
+        cssi.parse_line(shifted)
+
+    # 對照組：未位移的同一列必須正常解析，證明拒絕的原因是版面而非內容
+    assert cssi.parse_line(CSSI_SAMPLE)["f107_obs_c81"] == pytest.approx(82.9)
+
+
 def test_cssi_parses_observed_and_predicted_sections():
     text = "\n".join(
         [

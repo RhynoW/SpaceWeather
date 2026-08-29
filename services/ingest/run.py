@@ -36,6 +36,7 @@ from .nlsc_egnss import NlscEgnssConnector
 from .forecast_sources import (
     KyotoDstConnector,
     Swpc27DayOutlookConnector,
+    Swpc45DayForecastConnector,
     SwpcDrapConnector,
     SwpcGeomagForecastConnector,
 )
@@ -52,6 +53,7 @@ CONNECTORS: tuple[type[Connector], ...] = (
     SwpcSolarRegionsConnector,
     SwpcGeomagForecastConnector,
     Swpc27DayOutlookConnector,
+    Swpc45DayForecastConnector,
     KyotoDstConnector,
     SwpcDrapConnector,
     OmniConnector,

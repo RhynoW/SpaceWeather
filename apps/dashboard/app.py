@@ -1214,6 +1214,81 @@ elif page == "短時預報":
     st.caption("完整擂台（含所有基線與列聯表）見 `docs/forecast_verification.md`；"
                "機器可讀版見 `docs/forecast_skill.json`，API 為 `GET /v1/forecast`。")
 
+    # ── 驅動量的長提前量驗證 ────────────────────────────────────────
+    # 這一段與上面不是同一件事：上面驗的是地磁指數（小時尺度），
+    # 這裡驗的是**軌道預測實際依賴的驅動量**（F10.7 與 Ap，日尺度、提前量以週計）。
+    # 本案原本在這個尺度上一條驗證都沒有，議題一的 KPI 等於靠別人的預測值撐著。
+    st.divider()
+    st.subheader("驅動量的長提前量驗證（F10.7 與 Ap）")
+    st.caption(
+        "熱氣層密度、進而軌道衰減，是由逐日的 F10.7 與 Ap 驅動的，提前量以週計。"
+        "這組驗證與上方的地磁指數**不可橫向比較**：格點、單位、可預報性都不同。"
+    )
+
+    driver_rows = []
+    for key, unit in (("f107", "sfu"), ("ap", "nT")):
+        entry_all = (skill.get("targets", {}) or {}).get(key, {})
+        for hkey, entry in sorted((entry_all.get("horizons") or {}).items(),
+                                  key=lambda kv: float(kv[0])):
+            best, base = skill_models(entry)
+            if not best:
+                continue
+            driver_rows.append({
+                "目標": {"f107": "F10.7", "ap": "Ap"}[key],
+                "提前量": f"{float(hkey) / 24:g} 天",
+                "最佳模型": best.get("model"),
+                "層級": best.get("tier"),
+                f"MAE": best.get("MAE"),
+                "MAE 95% CI": f"{best.get('MAE_lo')}–{best.get('MAE_hi')}",
+                "RMSE": best.get("RMSE"),
+                "單位": unit,
+            })
+
+    if not driver_rows:
+        st.info(
+            "尚未產生驅動量驗證成績。執行 "
+            "`python -m services.forecast.run --verify --target f107 --write-summary` "
+            "與 `--target ap`。"
+        )
+    else:
+        st.dataframe(pd.DataFrame(driver_rows), hide_index=True, width='stretch')
+
+        d = pd.DataFrame(driver_rows)
+        d["lead_d"] = d["提前量"].str.replace(" 天", "", regex=False).astype(float)
+        fig2 = px.line(d, x="lead_d", y="MAE", color="目標", markers=True,
+                       labels={"lead_d": "提前量（天）", "MAE": "MAE"})
+        # 外部參考點：COMSPOC Spacebook 公開其自家 45 日預測的逐日誤差序列
+        # （/api/SpaceWeather/comparison/{f107,ap}，2023-12 起 689 個發布日）。
+        # 放進同一張圖是為了避免「我們的數字好像不錯」這種無錨點的自我評價。
+        for lead, mae, name in ((3, 22.8, "COMSPOC F10.7"), (7, 25.7, None),
+                                (30, 29.4, None), (45, 30.7, None)):
+            fig2.add_scatter(x=[lead], y=[mae], mode="markers",
+                             marker=dict(symbol="x", size=11, color="#e8a33d"),
+                             name=name, showlegend=name is not None)
+        for lead, mae, name in ((3, 8.2, "COMSPOC Ap"), (7, 7.5, None),
+                                (30, 8.5, None), (45, 8.0, None)):
+            fig2.add_scatter(x=[lead], y=[mae], mode="markers",
+                             marker=dict(symbol="x", size=11, color="#7e57c2"),
+                             name=name, showlegend=name is not None)
+        fig2.update_layout(height=340, margin=dict(l=0, r=0, t=10, b=0))
+        st.plotly_chart(fig2, width='stretch')
+
+        st.info(
+            "**兩個結果，方向相反。**\n\n"
+            "**F10.7**：誤差隨提前量成長（1 天 7.7 → 45 天 31.5 sfu），"
+            "但 27 天處出現凹陷（23.7 < 7 天的 26.8）——那是太陽自轉週期，"
+            "持續性基線自己帶出了 27 日復現的訊號。\n\n"
+            "**Ap**：3 天以後誤差**完全不隨提前量成長**（7.15 → 7.25 nT），"
+            "而且勝出的是氣候平均。這代表那個尺度的 Ap 預報實質上就是氣候值——"
+            "把它當成「預報」使用，會高估自己對阻力不確定性的掌握程度。"
+        )
+        st.caption(
+            "外部參考（圖上 ✕）為 COMSPOC Spacebook 公開之自家 45 日預測逐日誤差，"
+            "由其 `/api/SpaceWeather/comparison/*` 端點取得後自行換算（2023-12 起 689 個發布日）。"
+            "**兩者不在同一起跑線**：它是作業中的即時預測，我們是歷史回測；"
+            "期間也不完全重疊。放在一起是為了有個外部錨點，不是為了宣稱誰比較準。"
+        )
+
 
 # ── 6. RTK 現場查核（議題五）──────────────────────────────────────────
 elif page == "RTK 現場查核":

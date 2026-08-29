@@ -11,6 +11,11 @@
                         27 天，冕洞高速流會週期性復現，這是 24–48 小時以上horizon
                         少數有物理依據的預報訊號。
 
+  swpc_45day_forecast   45 日 Ap 與 F10.7 預報。**軌道預測實際依賴的驅動量**，
+                        提前量以週計；本案原本在這個尺度上沒有任何驗證。
+                        它是要打敗的作業基線，也是 COMSPOC 等業者合成
+                        CSSI 驅動檔時用的同一份來源。
+
   kyoto_dst             Kyoto WDC 逐時 Dst。地磁暴主相的標準指標，比 3 小時的 Kp
                         有更好的時間解析度，也是熱氣層密度響應的關鍵驅動。
 
@@ -134,6 +139,73 @@ class Swpc27DayOutlookConnector(Connector):
                      "unit": "1", "data_type": "PRD"},
                 ]
             )
+        if not recs:
+            return empty_frame()
+        df = pd.DataFrame(recs)
+        df["source_id"] = self.spec.source_id
+        df["source_tier"] = self.spec.tier
+        return normalize(df)
+
+
+class Swpc45DayForecastConnector(Connector):
+    """45 日 Ap 與 F10.7 預報——**軌道預測實際依賴的驅動量**。
+
+    為什麼要它：本案的預報擂台原本只驗 Kp（3–48 小時）與 Hp30（1–6 小時），
+    但軌道預測用的驅動量是**逐日的 F10.7 與 Ap**，提前量以週、月計。
+    那個尺度上我們一條驗證都沒有，議題一的 KPI 等於靠別人的預測值撐著。
+    這支是「要打敗的作業基線」：SWPC 自己的 45 天預報。
+
+    **沒有回填管道**（與 e-GNSS I95 同型的限制）：SWPC 只發布當前一份，
+    歷史版本不可取得。因此 SWPC 預報的實測成績只能自開始輪詢之日起累積，
+    靠資料層的 bitemporal（`ingest_time` + `as_of` 回放）還原「當時報了什麼」。
+    我們自己的模型則可用歷史觀測回測——兩者**不在同一個起跑線上**，
+    比較時必須講清楚，不可把「我們有回測、它沒有」說成「我們比較準」。
+
+    檔案裡的 `FORECASTER: AUTOMATED` 值得一記：這份 45 天預報是自動產生的，
+    不是預報員逐日判斷的產物。
+    """
+
+    formats = ("swpc_45day_txt",)
+    raw_ext = "txt"
+
+    #: 每列數個 `DDMonYY VVV` 對，例如 `28Aug26 034`
+    _PAIR_RE = re.compile(r"(\d{2}[A-Z][a-z]{2}\d{2})\s+(\d{1,4})")
+    _SECTIONS = (
+        ("45-DAY AP FORECAST", "AP_AVG", "nT"),
+        ("45-DAY F10.7 CM FLUX FORECAST", "F107_OBS", "sfu"),
+    )
+
+    def parse(self, payload: bytes) -> pd.DataFrame:
+        text = payload.decode("utf-8", errors="replace")
+        lines = text.splitlines()
+
+        starts = {}
+        for i, line in enumerate(lines):
+            for header, _code, _unit in self._SECTIONS:
+                if line.strip().startswith(header):
+                    starts[header] = i
+
+        recs: list[dict] = []
+        for header, code, unit in self._SECTIONS:
+            i = starts.get(header)
+            if i is None:
+                # 少一個區塊就少半份預報。回空表會讓另一半也不見，
+                # 所以只警告、繼續解析另一個區塊。
+                self.warn(f"{header} 區塊不存在（版面可能已改版）")
+                continue
+            for line in lines[i + 1:]:
+                if not self._PAIR_RE.search(line):
+                    break                      # 區塊結束
+                for day, value in self._PAIR_RE.findall(line):
+                    ts = pd.to_datetime(day, format="%d%b%y", utc=True, errors="coerce")
+                    if pd.isna(ts):
+                        continue
+                    recs.append({"valid_time": ts, "param_code": code,
+                                 "value": float(value), "unit": unit,
+                                 # PRD：來源自帶的預測，與本系統自產的 FCS 分開。
+                                 # 混在一起就分不出「誰預報的」，擂台也就沒得比。
+                                 "data_type": "PRD"})
+
         if not recs:
             return empty_frame()
         df = pd.DataFrame(recs)

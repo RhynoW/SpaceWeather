@@ -282,14 +282,19 @@ def evaluate(
     gap_days: int = 7,
     prob_threshold: float | None = None,
     objective: str = "csi",
-    storm_threshold: float = STORM_THRESHOLD,
+    storm_threshold: float | None = STORM_THRESHOLD,
     horizon_h: float | None = None,
     merge_gap_h: float = 3.0,
 ) -> pd.DataFrame:
     """同一擂台評估所有模型，回傳每個模型一列的成績表。
 
     給 `horizon_h` 時額外計算事件段命中率與提前量；不給則只有逐點指標。
+
+    `storm_threshold=None` 代表這個目標**沒有事件定義**（F10.7／Ap）：
+    只算 MAE／RMSE／技巧分數，不算 POD/FAR/CSI/HSS/BSS 與提前量。
+    硬給一個門檻就會印出一整排看起來很專業、但沒有任何作業意義的數字。
     """
+    events = storm_threshold is not None
     results: dict[str, dict[str, list]] = {}
 
     for train_mask, test_mask in rolling_origin_splits(
@@ -304,8 +309,11 @@ def evaluate(
             try:
                 fitted = model.fit(Xtr, ytr)
                 pred = np.asarray(fitted.predict(Xte), dtype=float)
-                prob = np.asarray(fitted.predict_proba_storm(Xte), dtype=float)
-                if prob_threshold is None:
+                prob = (np.asarray(fitted.predict_proba_storm(Xte), dtype=float)
+                        if events else np.full(len(Xte), np.nan))
+                if not events:
+                    thr, pod_tr = float("nan"), float("nan")
+                elif prob_threshold is None:
                     prob_tr = np.asarray(fitted.predict_proba_storm(Xtr), dtype=float)
                     ok_tr = np.isfinite(prob_tr)
                     ev_tr = (ytr.to_numpy()[ok_tr] >= storm_threshold).astype(int)
@@ -325,18 +333,19 @@ def evaluate(
             bucket = results.setdefault(model.name, {})
             bucket.setdefault("abs_err", []).extend(np.abs(pred[ok] - truth).tolist())
             bucket.setdefault("sq_err", []).extend(((pred[ok] - truth) ** 2).tolist())
-            bucket.setdefault("y_event", []).extend(
-                (truth >= storm_threshold).astype(int).tolist()
-            )
-            bucket.setdefault("prob", []).extend(prob[ok].tolist())
-            bucket.setdefault("pred_event", []).extend(
-                (prob[ok] >= thr).astype(int).tolist()
-            )
-            bucket.setdefault("thr", []).append(thr)
-            bucket.setdefault("pod_train", []).append(pod_tr)
             bucket.setdefault("tier", []).append(getattr(model, "tier", 9))
+            if events:
+                bucket.setdefault("y_event", []).extend(
+                    (truth >= storm_threshold).astype(int).tolist()
+                )
+                bucket.setdefault("prob", []).extend(prob[ok].tolist())
+                bucket.setdefault("pred_event", []).extend(
+                    (prob[ok] >= thr).astype(int).tolist()
+                )
+                bucket.setdefault("thr", []).append(thr)
+                bucket.setdefault("pod_train", []).append(pod_tr)
 
-            if horizon_h is not None:
+            if events and horizon_h is not None:
                 # 逐折計算：折與折之間有 gap，跨折併段會把不存在的事件接起來
                 ep = episode_lead_time(
                     yte.index[ok], (truth >= storm_threshold).astype(int),
@@ -359,26 +368,28 @@ def evaluate(
                          "note": note})
             continue
         abs_err = np.array(b["abs_err"])
-        ct = contingency(np.array(b["y_event"]), np.array(b["pred_event"]))
         lo, hi = bootstrap_ci(abs_err)
-        rows.append(
-            {
-                "model": name,
-                "tier": int(np.median(b["tier"])),
-                "n": len(abs_err),
-                "MAE": round(float(np.mean(abs_err)), 3),
-                "MAE_lo": round(lo, 3),
-                "MAE_hi": round(hi, 3),
-                "RMSE": round(float(np.sqrt(np.mean(b["sq_err"]))), 3),
+        row = {
+            "model": name,
+            "tier": int(np.median(b["tier"])),
+            "n": len(abs_err),
+            "MAE": round(float(np.mean(abs_err)), 3),
+            "MAE_lo": round(lo, 3),
+            "MAE_hi": round(hi, 3),
+            "RMSE": round(float(np.sqrt(np.mean(b["sq_err"]))), 3),
+            "status": "ok",
+        }
+        if events:
+            ct = contingency(np.array(b["y_event"]), np.array(b["pred_event"]))
+            row.update({
                 **ct.to_dict(),
                 "thr": round(float(np.median(b.get("thr", [0.5]))), 2),
                 "POD_train": round(float(np.nanmedian(b.get("pod_train", [np.nan]))), 3),
                 "Brier": round(brier_score(np.array(b["y_event"]), np.array(b["prob"])), 4),
                 "BSS": round(brier_skill_score(np.array(b["y_event"]), np.array(b["prob"])), 3),
-                "status": "ok",
-            }
-        )
-        if horizon_h is not None:
+            })
+        rows.append(row)
+        if events and horizon_h is not None:
             total, hit = sum(b.get("ep_total", [])), sum(b.get("ep_hit", []))
             leads = np.array(b.get("leads", []), dtype=float)
             rows[-1].update({
@@ -445,8 +456,10 @@ def verdict(table: pd.DataFrame) -> str:
             "ML 模型未能超越。依 Tier 0 門檻，不應上線。"
         )
     gain = 1 - best["MAE"] / best_baseline["MAE"]
-    return (
+    head = (
         f"{best['model']} MAE {best['MAE']}（95% CI {best['MAE_lo']}–{best['MAE_hi']}），"
-        f"優於最佳基線 {best_baseline['model']}（{best_baseline['MAE']}）{gain:.1%}；"
-        f"POD {best['POD']}、FAR {best['FAR']}、BSS {best['BSS']}。"
+        f"優於最佳基線 {best_baseline['model']}（{best_baseline['MAE']}）{gain:.1%}"
     )
+    if "POD" not in best.index or pd.isna(best.get("POD")):
+        return head + "。（此目標無事件定義，只有連續型指標。）"
+    return head + f"；POD {best['POD']}、FAR {best['FAR']}、BSS {best['BSS']}。"
