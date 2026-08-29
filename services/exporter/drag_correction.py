@@ -26,17 +26,23 @@ DEFAULT_ALT_BANDS = ((300, 400), (400, 500), (500, 600))
 
 
 def _uncertainty(storm_ratio: float, ap: float) -> float:
-    """修正因子的保守不確定度（1σ 概念值）。
+    """修正因子的 1σ 不確定度（對數空間，可直接用作 exp(±σ) 的倍率）。
 
-    依據：擾動越強，密度模型的偏差越大且越不對稱。此為**經驗保守值**，
-    非由實測校準而來——交付文件必須明示此點，不可讓使用者誤以為是實測誤差棒。
+    **改為由實測校準**（docs/density_calibration.json）：福衛七號精密定軌反演的
+    DRAG_ENHANCEMENT 除以 MSIS 的 storm_ratio，其散布就是這個修正因子的誤差。
+    校準檔缺席時退回原本的經驗式，並在產品中繼資料標示 calibrated=false——
+    沒有實測就該說是猜的，不可讓使用者誤以為是實測誤差棒。
+
+    實測（799 筆，2023-02→2026-06，550 km）顯示原本的經驗式**兩個方向都錯**：
+    平靜期給 0.15 而實測 0.223（過於樂觀），ap≥50 給 0.35 而實測 0.282
+    （過於保守）。憑直覺調保守係數，會同時在兩端調錯方向。
     """
     if not np.isfinite(storm_ratio):
         return float("nan")
-    base = 0.15                       # 平靜期 MSIS 典型偏差約 15%
-    storm = 0.10 * max(0.0, np.log10(max(ap, 1.0)))
-    excess = 0.20 * max(0.0, storm_ratio - 1.0)
-    return round(float(base + storm + excess), 3)
+    from orbit_drag.calibration import sigma_log
+
+    sigma, _calibrated = sigma_log(float(ap))
+    return round(float(sigma), 3)
 
 
 def build(
@@ -97,7 +103,7 @@ def to_event_products(df: pd.DataFrame) -> list[dict]:
                 "unc": float(peak["uncertainty"]),
                 "peak_utc": peak["valid_time"].isoformat().replace("+00:00", "Z"),
                 "method": "MSIS 2.1 storm-ratio (same F10.7, quiet Ap baseline, storm-time ap mode)",
-                "calibrated_by_observation": False,
+                "calibrated_by_observation": _calibration_summary()["calibrated"],
             }
         )
     return sorted(out, key=lambda d: d["alt_band_km"][0])
@@ -123,8 +129,24 @@ def product_metadata() -> dict:
             "quiet values — daily Ap=4 AND all 7 elements of the ap history set to 4"
         ),
         "evaluated_at": "lat 0.0, lon 0.0 (fixed reference point; see docs)",
-        "calibrated_by_observation": False,
+        # 不確定度是否由實測校準，與比值本身是否校準是兩件事：
+        # 比值仍是純模式輸出，只有它的誤差棒有了實測依據。混為一談會讓
+        # 使用者以為 storm_ratio 已被觀測修正過。
+        "calibrated_by_observation": _calibration_summary()["calibrated"],
+        "uncertainty_calibration": _calibration_summary(),
+        "uncertainty_definition": (
+            "1-sigma in log space; multiply/divide the ratio by exp(sigma) "
+            "for the band. Calibrated against FORMOSAT-7 POD-derived "
+            "DRAG_ENHANCEMENT / MSIS storm_ratio; the spread is an upper bound "
+            "on model error because it also contains POD retrieval noise."
+        ),
     }
+
+
+def _calibration_summary() -> dict:
+    from orbit_drag.calibration import summary
+
+    return summary()
 
 
 def export(

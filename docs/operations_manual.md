@@ -311,6 +311,10 @@ python -m services.forecast.run --verify --target ap --write-summary
 # 驅動量的選擇造成多少沿跡誤差（把 sfu／nT 換算成公里）
 python -m tools.alongtrack_drivers --alt 500 --days 45
 
+# 密度不確定度的實測校準（福衛七號反演 ÷ MSIS；需先回填事件窗的 tacc_leoorb）
+python -m tools.calibrate_density_uncertainty --write
+python -m services.ingest.run --source tacc_leoorb --date 2024.132 --span-days 20
+
 # 預報引擎的訓練資料（OMNI2，六年）
 python -m services.ingest.run --source omni2_hourly --years 6
 

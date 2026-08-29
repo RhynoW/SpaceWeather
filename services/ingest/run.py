@@ -81,7 +81,8 @@ def build(spec: SourceSpec, store: SwxStore) -> Connector:
 def run_source(source_id: str, store: SwxStore, *, offline: bool = False,
                ingest_time: datetime | None = None,
                backfill: bool = False, year: int | None = None,
-               reparse: bool = False, window_days: float | None = None) -> FetchOutcome:
+               reparse: bool = False, window_days: float | None = None,
+               date: str | None = None, span_days: int | None = None) -> FetchOutcome:
     spec = catalog()[source_id]
     if not spec.is_ready:
         return FetchOutcome(source_id, ok=False, mode="skipped",
@@ -89,6 +90,15 @@ def run_source(source_id: str, store: SwxStore, *, offline: bool = False,
     conn = build(spec, store)
     if year is not None and hasattr(conn, "year"):
         conn.year = year
+    # 逐日打包的來源（tacc_leoorb）需要指定歷史日期才能回填事件窗。
+    # 屬性不存在時**必須報錯而非靜默忽略**：使用者以為抓了 2024-05，
+    # 實際抓的是昨天，之後所有分析都建在錯的資料上而沒有任何徵兆。
+    for name, value in (("date", date), ("_span", span_days)):
+        if value is None:
+            continue
+        if not hasattr(conn, name):
+            raise ValueError(f"{source_id} 的 connector 不支援 {name.lstrip('_')}")
+        setattr(conn, name, value)
     if offline:
         conn.spec = SourceSpec(**{**spec.__dict__, "endpoint": None})
     if window_days is not None:
@@ -153,6 +163,11 @@ def main(argv: list[str] | None = None) -> int:
                     help="回填模式：ingest_time 依來源發布延遲推算，使 as_of 回放可用")
     ap.add_argument("--reparse", action="store_true",
                     help="不連外，改解析最新一份原始落地檔（解析規則改變時重跑用）")
+    ap.add_argument("--date", default=None,
+                    help="逐日打包來源的目標日期 YYYY.DDD（如 tacc_leoorb 的 2024.132）；"
+                         "由該日往回抓 span_days 天")
+    ap.add_argument("--span-days", type=int, default=None,
+                    help="逐日打包來源一次抓幾天（預設見 sources.yaml 的 span_days）")
     ap.add_argument("--window-days", type=float, default=None,
                     help="覆寫來源的 window_days（僅本次執行；用於回填歷史）")
     args = ap.parse_args(argv)
@@ -169,7 +184,8 @@ def main(argv: list[str] | None = None) -> int:
     else:
         outcomes = [run_source(args.source, store, offline=args.offline,
                                backfill=args.backfill, reparse=args.reparse,
-                               window_days=args.window_days)]
+                               window_days=args.window_days,
+                               date=args.date, span_days=args.span_days)]
 
     for o in outcomes:
         print(o)

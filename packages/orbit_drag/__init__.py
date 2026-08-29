@@ -13,6 +13,12 @@ from .alongtrack import (
     constant_drivers,
     propagate,
 )
+from .calibration import (
+    CALIBRATION_PATH,
+    band_factors,
+    load_calibration,
+    sigma_log,
+)
 from .atmospheric import (
     MU,
     RE,
@@ -27,6 +33,7 @@ __all__ = [
     "MU", "RE",
     "BC_REFERENCE", "DEFAULT_BC", "Scenario",
     "alongtrack_km", "compare", "constant_drivers", "propagate",
+    "CALIBRATION_PATH", "band_factors", "load_calibration", "sigma_log",
     "density", "density_ratio", "drag_residual", "is_reentry_decay",
     "load_space_weather",
 ]

@@ -1,0 +1,68 @@
+{
+  "bands": [
+    {
+      "ap_max": 10.0,
+      "ap_min": 0.0,
+      "label": "ap<10",
+      "median": 0.795,
+      "n": 343,
+      "p16": 0.84,
+      "p84": 1.303,
+      "p95": 1.442,
+      "sigma_log": 0.223,
+      "usable": true
+    },
+    {
+      "ap_max": 20.0,
+      "ap_min": 10.0,
+      "label": "ap 10-20",
+      "median": 0.797,
+      "n": 227,
+      "p16": 0.785,
+      "p84": 1.283,
+      "p95": 1.429,
+      "sigma_log": 0.251,
+      "usable": true
+    },
+    {
+      "ap_max": 50.0,
+      "ap_min": 20.0,
+      "label": "ap 20-50",
+      "median": 0.79,
+      "n": 151,
+      "p16": 0.773,
+      "p84": 1.232,
+      "p95": 1.512,
+      "sigma_log": 0.232,
+      "usable": true
+    },
+    {
+      "ap_max": null,
+      "ap_min": 50.0,
+      "label": "ap>=50",
+      "median": 0.85,
+      "n": 78,
+      "p16": 0.826,
+      "p84": 1.413,
+      "p95": 1.791,
+      "sigma_log": 0.282,
+      "usable": true
+    }
+  ],
+  "command": "python -m tools.calibrate_density_uncertainty --write",
+  "eval_alt_km": 550.0,
+  "eval_coords": [
+    23.5,
+    121.0
+  ],
+  "generated_utc": "2026-08-29T10:04:00Z",
+  "global_median": 0.796,
+  "n_total": 799,
+  "note": "校準的是散布不是偏差：兩側基線可能有常數偏移，中位數不可單獨引用。散布含精密定軌反演自身的雜訊，故 sigma_log 是模式誤差的上界。",
+  "sample_span_utc": [
+    "2023-02-12T06:00:00Z",
+    "2026-06-29T18:00:00Z"
+  ],
+  "schema": 1,
+  "source": "DRAG_ENHANCEMENT（福衛七號 TACC leoOrb 精密定軌反演） / MSIS 2.1 storm_ratio"
+}
