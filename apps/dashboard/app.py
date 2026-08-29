@@ -1693,9 +1693,16 @@ elif page == "軌道與密度修正":
         with st.spinner("以 MSIS 2.1 推算中…"):
             at_table, at_stats, at_fc = _alongtrack(at_alt, at_bc, at_bias)
     except Exception as exc:      # noqa: BLE001 - 缺 45 日預報時不該讓整頁掛掉
+        # 雲端站台沒有終端機，「請執行某指令」不是可行的指示。
+        # 先說出這個來源在最近一次自動更新中的下場，再給本機用的指令。
+        at_state, at_detail = source_refresh_note("swpc_45day_forecast")
         st.info(
-            f"無法推算（{type(exc).__name__}）。多半是資料層還沒有 SWPC 45 日預報——"
-            "執行 `python -m services.ingest.run --source swpc_45day_forecast`。"
+            f"**尚無法推算**（{type(exc).__name__}）。\n\n"
+            f"來源 `swpc_45day_forecast` 在最近一次自動更新中的結果："
+            f"**{at_state}** — {at_detail}。\n\n"
+            + ("背景更新完成後重新整理本頁即可。" if at_state in ("running", "not_run")
+               else "本機可執行 `python -m services.ingest.run "
+                    "--source swpc_45day_forecast`。")
         )
     else:
         plot = at_table[at_table["scenario"] != "swpc45"].copy()
