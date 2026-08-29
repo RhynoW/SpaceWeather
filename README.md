@@ -175,6 +175,7 @@ pip install -r requirements.lock   # 重現本文數字時使用
 | Hp30 預報（1／3／6 h） | 研究階段 | 同一擂台、5 折、含提前量 | 1 h 的 BSS 0.475、FAR 0.337 為全部組合最佳，但持續性基線 POD 更高（0.729 對 0.601）；6 h 中位提前量為負，屬事後偵測 | `docs/forecast_verification.md` |
 | **F10.7 預報（1–45 天）** | **不發布產品** | 4 折滾動起報、日格點、2021–2026 | 每個提前量都由 **Tier 0 持續性勝出**（1 天 MAE 7.7 → 45 天 31.5 sfu），依門檻不應上線；27 天處出現凹陷（太陽自轉） | `docs/forecast_verification.md` |
 | **Ap 預報（1–45 天）** | **不發布產品** | 同上 | 3 天以後誤差**不隨提前量成長**（7.15 → 7.25 nT）且由**氣候平均**勝出——該尺度的 Ap 預報實質上就是氣候值 | `docs/forecast_verification.md` |
+| **沿跡不確定度** | 分析工具 | 近圓軌道能量法封閉解，非傳播器 | 500 km／45 天：換驅動量預報差 **252 km**、密度模型 ±15% 差 **209 km**——兩者同量級，只報一項會低估一半；400 km 時放大到 1 400 km 以上 | `docs/forecast_verification.md`、`tools/alongtrack_drivers.py` |
 | 事件卡生命週期 | 原型 | `draft → issued → superseded` 轉移、禁止重複發布、發布者記入稽核軌跡 | 尚未接正式人工簽核流程；API 未回傳 `reviewed_by`／`reviewed_at` | `tests/test_event_lifecycle.py` |
 | 判定依據 `inference` | 已完成 | 四值列舉、永不為 null、網域取最弱項、無資料回 `unavailable` | 觀測／模型之分類依參數清單判定，非逐筆溯源 | `tests/test_event_lifecycle.py` |
 | IGRF 基準場 | 已完成 | **值域合理性檢查**（F/D/I 落在臺灣公認範圍、磁傾角隨緯度單調遞增） | **未與任一測站實測序列逐點比對**；區域擾動仍為推估 | `tests/test_geomag.py` |
@@ -694,7 +695,7 @@ python tools/make_source_list.py     # → docs/SpaceWeather資料來源清單YY
 | **RTK 現場查核** | `rtk` | I95 現況（分網）、兩類肇因查核表、模式 × 事件型態影響矩陣 |
 | 短時預報 | `forecast` | 兩組地磁目標（Hp30 1／3／6 h、Kp 3–48 h）；預報值與該 horizon 的實測技巧（POD／FAR／提前量／可信度）並列。頁尾另有 **F10.7／Ap 的長提前量驗證**（1–45 天）與外部作業系統的量級對照 |
 | 地磁基準場 | `geomag` | IGRF 參考場、測站表、ΔH 推估、Hp30 解析度對比 |
-| 軌道與密度修正 | `density` | 密度修正倍率、STK 驅動檔下載 |
+| 軌道與密度修正 | `density` | 密度修正倍率、STK 驅動檔下載。頁尾另有**驅動量的選擇值多少公里**：把預報擂台量到的 sfu／nT 換算成沿跡距離，並與密度模型自身的偏差比大小 |
 | 資料健康 | `health` | 各通道齡期、品質旗標分布、資料源盤點 |
 | 門檻校準 | `thresholds` | 互動式門檻掃描（供校準工作坊使用） |
 | **太陽與行星際影像** | `imagery` | 13 張公開影像＋**9 段動畫**：黑子／日珥／磁圖／閃焰／三色合成／日冕儀 C2·C3、CME 傳播模擬、D 層吸收、全球 TEC、極光橢圓；另有**向日葵九號地球全球面盤**作為對照，以及獨立成組的**繪算影像**（月相），刻意與實拍分開呈現 |
@@ -759,6 +760,7 @@ python -m services.forecast.run --predict --write           # 產生預報並寫
 python -m services.forecast.run --verify --target hp30      # 1／3／6 h（30 分鐘格點）
 python -m services.forecast.run --verify --target f107      # 1–45 天（日格點，阻力驅動量）
 python -m services.forecast.run --verify --target ap
+python -m tools.alongtrack_drivers --alt 500 --days 45   # 驅動量選擇 → 沿跡公里數
 python -m services.forecast.run --verify --write-summary    # 成績寫入 docs/forecast_skill.json
 python -m services.forecast.run --predict --target hp30     # 構想書要求的 1 小時產品
 

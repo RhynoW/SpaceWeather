@@ -4,6 +4,15 @@
 物理與該案一致，差異在於驅動參數改由 swx_core 資料層供給，因而支援 as_of 回放。
 """
 
+from .alongtrack import (
+    BC_REFERENCE,
+    DEFAULT_BC,
+    Scenario,
+    alongtrack_km,
+    compare,
+    constant_drivers,
+    propagate,
+)
 from .atmospheric import (
     MU,
     RE,
@@ -16,6 +25,8 @@ from .atmospheric import (
 
 __all__ = [
     "MU", "RE",
+    "BC_REFERENCE", "DEFAULT_BC", "Scenario",
+    "alongtrack_km", "compare", "constant_drivers", "propagate",
     "density", "density_ratio", "drag_residual", "is_reentry_decay",
     "load_space_weather",
 ]

@@ -374,6 +374,41 @@ def test_freshness_ignores_future_ingest_times(tmp_path):
     assert abs(age - 7200) < 60, f"齡期應約 2 小時，實得 {age}s"
 
 
+def test_source_filter_must_go_into_the_query_not_after_it(tmp_path):
+    """`query(...)` 去重後再篩 source_id，會讓被別的來源勝出的時刻整天消失。
+
+    實例：F10.7 的同一天同時有 swpc_27day_outlook 與 swpc_45day_forecast 的
+    預測值。DISTINCT ON 只留一列，事後再篩 45 日來源，前 27 天就全沒了——
+    45 天的預報只剩 9 天，而且沒有任何錯誤訊息。
+    """
+    store = SwxStore(tmp_path)
+    times = pd.date_range("2026-09-01", periods=5, freq="24h", tz="UTC")
+
+    def _prd(source_id, value, n):
+        return normalize(pd.DataFrame({
+            "valid_time": times[:n], "param_code": "F107_OBS", "value": float(value),
+            "unit": "sfu", "source_id": source_id, "source_tier": 1,
+            "data_type": "PRD",
+        }))
+
+    # 重疊的前 3 天由 27 日展望勝出（同 tier、入庫較新），這正是實際發生的情況
+    store.write(_prd("swpc_45day_forecast", 120.0, 5), source_id="swpc_45day_forecast",
+                ingest_time=datetime(2026, 8, 29, 0, tzinfo=timezone.utc))
+    store.write(_prd("swpc_27day_outlook", 100.0, 3), source_id="swpc_27day_outlook",
+                ingest_time=datetime(2026, 8, 29, 1, tzinfo=timezone.utc))
+
+    everything = store.query("F107_OBS")
+    after = everything[everything["source_id"] == "swpc_45day_forecast"]
+    inside = store.query("F107_OBS", source_id="swpc_45day_forecast")
+
+    assert len(inside) == 5, "查詢內篩來源應取得完整 5 天"
+    assert len(after) == 2, "事後過濾應只剩未被覆蓋的 2 天"
+    assert len(after) < len(inside), (
+        "本測試的前提是去重會讓事後過濾漏資料；若去重行為改變，"
+        "請一併檢討所有事後過濾 source_id 的呼叫點"
+    )
+
+
 def test_heavy_sources_excluded_from_auto_refresh():
     """重量級來源不得進入頁面載入路徑。
 

@@ -1644,6 +1644,93 @@ elif page == "軌道與密度修正":
                            file_name="SpaceWeather-All-v1.2.txt")
         st.caption("置入 STK 的 CSSI 太空天氣檔路徑，HPOP 選 MSIS 2.1／JB2008 即生效。")
 
+    # ── 驅動量的選擇值多少公里 ──────────────────────────────────────
+    # 預報擂台量出「45 天期的 Ap 預報等於氣候值」之後，接下來該問的是
+    # **那又怎樣**。這一段把 sfu 與 nT 換算成沿跡公里數，並與密度模型
+    # 自身的偏差擺在一起比大小——不比，就無從判斷該投資哪一邊。
+    st.divider()
+    st.subheader("驅動量的選擇，在軌道上值多少公里")
+    st.caption(
+        "近圓軌道能量法的封閉解（見 `packages/orbit_drag/alongtrack.py`），"
+        "不含 J2 共振、姿態變化與機動。用途是比較**量級**，"
+        "不是預測某一顆衛星的實際位置。"
+    )
+
+    ac1, ac2, ac3 = st.columns(3)
+    at_alt = ac1.selectbox("初始高度", [400, 500, 600], index=1,
+                           format_func=lambda v: f"{v} km")
+    at_bc = ac2.selectbox(
+        "彈道係數 Cd·A/m", [0.005, 0.012, 0.022], index=1,
+        format_func=lambda v: {0.005: "0.005（密實本體）", 0.012: "0.012（一般遙測）",
+                               0.022: "0.022（立方衛星）"}[v],
+    )
+    at_bias = ac3.slider("密度模型偏差", 0.05, 0.30, 0.15, 0.05,
+                         help="MSIS 平靜期典型偏差約 15%。這是模型自身的誤差，"
+                              "與驅動量的選擇是兩件事")
+
+    @st.cache_data(ttl=1800)
+    def _alongtrack(alt: float, bc: float, bias: float):
+        import sys as _sys
+        from pathlib import Path as _Path
+
+        _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+        from orbit_drag import Scenario, compare
+        from tools.alongtrack_drivers import arena_best_drivers, swpc_forecast_drivers
+
+        st_ = get_store()
+        fc = swpc_forecast_drivers(st_)
+        epochs = pd.DatetimeIndex(fc.index[:45])
+        best, stats = arena_best_drivers(st_, epochs)
+        scen = [
+            Scenario("swpc45", "SWPC 45 日預報", fc),
+            Scenario("arena_best", "擂台最佳（F10.7 持續性＋Ap 氣候）", best),
+            Scenario("msis_hi", f"密度 ×{1 + bias:.2f}", fc, rho_scale=1 + bias),
+            Scenario("msis_lo", f"密度 ×{1 - bias:.2f}", fc, rho_scale=1 - bias),
+        ]
+        return compare(scen, epochs, alt, bc=bc), stats, fc
+
+    try:
+        with st.spinner("以 MSIS 2.1 推算中…"):
+            at_table, at_stats, at_fc = _alongtrack(at_alt, at_bc, at_bias)
+    except Exception as exc:      # noqa: BLE001 - 缺 45 日預報時不該讓整頁掛掉
+        st.info(
+            f"無法推算（{type(exc).__name__}）。多半是資料層還沒有 SWPC 45 日預報——"
+            "執行 `python -m services.ingest.run --source swpc_45day_forecast`。"
+        )
+    else:
+        plot = at_table[at_table["scenario"] != "swpc45"].copy()
+        plot["天"] = (plot["epoch"] - at_table["epoch"].min()).dt.days
+        figa = px.line(plot, x="天", y="alongtrack_km", color="label",
+                       labels={"alongtrack_km": "相對 SWPC 45 日預報的沿跡差（km）"})
+        figa.update_layout(height=340, margin=dict(l=0, r=0, t=10, b=0),
+                           legend_title="")
+        st.plotly_chart(figa, width='stretch')
+
+        last = (at_table[at_table["epoch"] == at_table["epoch"].max()]
+                .set_index("scenario")["alongtrack_km"])
+        d_driver = abs(float(last.get("arena_best", float("nan"))))
+        d_model = max(abs(float(last.get("msis_hi", 0))), abs(float(last.get("msis_lo", 0))))
+        m1, m2 = st.columns(2)
+        m1.metric("第 45 天：換一組驅動量預報", f"{d_driver:,.0f} km")
+        m2.metric(f"第 45 天：密度模型 ±{at_bias:.0%}", f"{d_model:,.0f} km")
+
+        st.warning(
+            f"**這 {d_driver:,.0f} 公里不是「修正量」，是不確定度。**\n\n"
+            "預報擂台量到的是：45 天期的 F10.7 預報與持續性基線 MAE 在同一量級"
+            "（30.7 對 31.5 sfu），Ap 預報與氣候平均也在同一量級。"
+            "既然兩種驅動量假設的準確度分不出高下，它們造成的沿跡差就"
+            "**無法靠選一邊來消除**——那是這個提前量上的固有誤差。\n\n"
+            "作業上應把它與密度模型偏差一併計入沿跡不確定度，"
+            "而不是只報其中一項，更不是拿它當修正。"
+        )
+        st.caption(
+            f"SWPC 45 日預報 F10.7 {at_fc['f107'].min():.0f}–{at_fc['f107'].max():.0f} sfu、"
+            f"Ap {at_fc['ap'].min():.0f}–{at_fc['ap'].max():.0f} nT；"
+            f"擂台最佳為 F10.7 {at_stats['f107_persist']:.1f} sfu（持續性）與 "
+            f"Ap {at_stats['ap_climatology']:.1f} nT（{at_stats['n_days']} 天氣候平均）。"
+            "沿跡差以時間平方成長，故高度越低、天數越長，差距放大得越快。"
+        )
+
 
 # ── 8. 資料健康 ─────────────────────────────────────────────────────────
 elif page == "資料健康":
