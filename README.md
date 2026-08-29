@@ -175,7 +175,8 @@ pip install -r requirements.lock   # 重現本文數字時使用
 | Hp30 預報（1／3／6 h） | 研究階段 | 同一擂台、5 折、含提前量 | 1 h 的 BSS 0.475、FAR 0.337 為全部組合最佳，但持續性基線 POD 更高（0.729 對 0.601）；6 h 中位提前量為負，屬事後偵測 | `docs/forecast_verification.md` |
 | **F10.7 預報（1–45 天）** | **不發布產品** | 4 折滾動起報、日格點、2021–2026 | 每個提前量都由 **Tier 0 持續性勝出**（1 天 MAE 7.7 → 45 天 31.5 sfu），依門檻不應上線；27 天處出現凹陷（太陽自轉） | `docs/forecast_verification.md` |
 | **Ap 預報（1–45 天）** | **不發布產品** | 同上 | 3 天以後誤差**不隨提前量成長**（7.15 → 7.25 nT）且由**氣候平均**勝出——該尺度的 Ap 預報實質上就是氣候值 | `docs/forecast_verification.md` |
-| **沿跡不確定度** | 分析工具 | 近圓軌道能量法封閉解，非傳播器 | 500 km／45 天：換驅動量預報差 **252 km**、密度模型 ±15% 差 **209 km**——兩者同量級，只報一項會低估一半；400 km 時放大到 1 400 km 以上 | `docs/forecast_verification.md`、`tools/alongtrack_drivers.py` |
+| **沿跡不確定度** | 分析工具 | 近圓軌道能量法封閉解，非傳播器 | 500 km／45 天：換驅動量預報差 **252 km**、密度模型 ±1σ 差 **359 km**——密度模型較大，只報一項會低估一半以上；400 km 時放大到 2 600 km 以上 | `docs/forecast_verification.md`、`tools/alongtrack_drivers.py` |
+| **密度不確定度校準** | 實測 | 福衛七號精密定軌反演 ÷ MSIS，799 筆／10 個事件窗／2023-02→2026-06 | 1σ 由手訂常數改為實測：平靜 **0.223**（原猜 0.15，過於樂觀）、ap≥50 **0.282**（原猜 0.35，過於保守）。**校準的是散布不是偏差**，中位數不可引用為模式偏差 | `docs/density_calibration.json`、`tools/calibrate_density_uncertainty.py` |
 | 事件卡生命週期 | 原型 | `draft → issued → superseded` 轉移、禁止重複發布、發布者記入稽核軌跡 | 尚未接正式人工簽核流程；API 未回傳 `reviewed_by`／`reviewed_at` | `tests/test_event_lifecycle.py` |
 | 判定依據 `inference` | 已完成 | 四值列舉、永不為 null、網域取最弱項、無資料回 `unavailable` | 觀測／模型之分類依參數清單判定，非逐筆溯源 | `tests/test_event_lifecycle.py` |
 | IGRF 基準場 | 已完成 | **值域合理性檢查**（F/D/I 落在臺灣公認範圍、磁傾角隨緯度單調遞增） | **未與任一測站實測序列逐點比對**；區域擾動仍為推估 | `tests/test_geomag.py` |
@@ -761,6 +762,7 @@ python -m services.forecast.run --verify --target hp30      # 1／3／6 h（30 �
 python -m services.forecast.run --verify --target f107      # 1–45 天（日格點，阻力驅動量）
 python -m services.forecast.run --verify --target ap
 python -m tools.alongtrack_drivers --alt 500 --days 45   # 驅動量選擇 → 沿跡公里數
+python -m tools.calibrate_density_uncertainty --write    # 密度不確定度的實測校準
 python -m services.forecast.run --verify --write-summary    # 成績寫入 docs/forecast_skill.json
 python -m services.forecast.run --predict --target hp30     # 構想書要求的 1 小時產品
 

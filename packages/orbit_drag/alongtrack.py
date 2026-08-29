@@ -56,7 +56,10 @@ class Scenario:
     name: str
     label: str
     sw: pd.DataFrame
-    rho_scale: float = 1.0
+    #: 純量，或與 epochs 等長的逐時刻倍率。逐時刻是為了讓不確定度帶
+    #: 隨地磁活動變寬——暴時的模式誤差比平靜期大，用單一常數會在
+    #: 平靜段高估、暴時段低估。
+    rho_scale: float | np.ndarray = 1.0
     note: str = ""
 
 
@@ -77,7 +80,7 @@ def propagate(
     sw: pd.DataFrame,
     *,
     bc: float = DEFAULT_BC,
-    rho_scale: float = 1.0,
+    rho_scale: float | np.ndarray = 1.0,
     lat: float = 0.0,
     lon: float = 0.0,
 ) -> pd.DataFrame:
@@ -103,6 +106,12 @@ def propagate(
     if not np.all(dt > 0):
         raise ValueError("epochs 必須嚴格遞增")
 
+    scale = np.asarray(rho_scale, dtype=float)
+    if scale.ndim == 0:
+        scale = np.full(len(epochs), float(scale))
+    elif len(scale) != len(epochs):
+        raise ValueError(f"rho_scale 長度 {len(scale)} 與 epochs {len(epochs)} 不符")
+
     rho_all = np.empty(len(epochs))
     sma = np.empty(len(epochs))
     theta = np.zeros(len(epochs))
@@ -110,7 +119,7 @@ def propagate(
     for i, epoch in enumerate(epochs):
         alt_km = (a - RE_SI) / 1e3
         rho = float(density([epoch], np.array([alt_km]), sw, lat=lat, lon=lon)[0])
-        rho *= rho_scale
+        rho *= scale[i]
         rho_all[i] = rho
         sma[i] = a
 

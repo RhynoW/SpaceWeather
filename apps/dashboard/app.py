@@ -1664,34 +1664,40 @@ elif page == "軌道與密度修正":
         format_func=lambda v: {0.005: "0.005（密實本體）", 0.012: "0.012（一般遙測）",
                                0.022: "0.022（立方衛星）"}[v],
     )
-    at_bias = ac3.slider("密度模型偏差", 0.05, 0.30, 0.15, 0.05,
-                         help="MSIS 平靜期典型偏差約 15%。這是模型自身的誤差，"
-                              "與驅動量的選擇是兩件事")
+    at_calib = ac3.checkbox("用實測校準的 1σ", value=True,
+                            help="勾選時由 docs/density_calibration.json 逐時刻決定"
+                                 "（實測 799 筆，福衛七號精密定軌反演 ÷ MSIS）；"
+                                 "取消則用手動常數")
+    at_bias = None if at_calib else ac3.slider("密度模型 1σ（手動）", 0.05, 0.40, 0.15, 0.05)
 
     @st.cache_data(ttl=1800)
-    def _alongtrack(alt: float, bc: float, bias: float):
+    def _alongtrack(alt: float, bc: float, bias: float | None):
         import sys as _sys
         from pathlib import Path as _Path
 
         _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
         from orbit_drag import Scenario, compare
-        from tools.alongtrack_drivers import arena_best_drivers, swpc_forecast_drivers
+        from tools.alongtrack_drivers import (arena_best_drivers, model_band,
+                                              swpc_forecast_drivers)
 
         st_ = get_store()
         fc = swpc_forecast_drivers(st_)
         epochs = pd.DatetimeIndex(fc.index[:45])
         best, stats = arena_best_drivers(st_, epochs)
+        hi, lo, ok, sig = model_band(fc, epochs, override=bias)
+        tag = (f"實測 1σ {sig.min():.2f}–{sig.max():.2f}" if ok
+               else f"手動 1σ {sig.mean():.2f}")
         scen = [
             Scenario("swpc45", "SWPC 45 日預報", fc),
             Scenario("arena_best", "擂台最佳（F10.7 持續性＋Ap 氣候）", best),
-            Scenario("msis_hi", f"密度 ×{1 + bias:.2f}", fc, rho_scale=1 + bias),
-            Scenario("msis_lo", f"密度 ×{1 - bias:.2f}", fc, rho_scale=1 - bias),
+            Scenario("msis_hi", f"密度 +1σ（{tag}）", fc, rho_scale=hi),
+            Scenario("msis_lo", f"密度 -1σ（{tag}）", fc, rho_scale=lo),
         ]
-        return compare(scen, epochs, alt, bc=bc), stats, fc
+        return compare(scen, epochs, alt, bc=bc), stats, fc, tag, ok
 
     try:
         with st.spinner("以 MSIS 2.1 推算中…"):
-            at_table, at_stats, at_fc = _alongtrack(at_alt, at_bc, at_bias)
+            at_table, at_stats, at_fc, at_tag, at_ok = _alongtrack(at_alt, at_bc, at_bias)
     except Exception as exc:      # noqa: BLE001 - 缺 45 日預報時不該讓整頁掛掉
         # 雲端站台沒有終端機，「請執行某指令」不是可行的指示。
         # 先說出這個來源在最近一次自動更新中的下場，再給本機用的指令。
@@ -1719,7 +1725,10 @@ elif page == "軌道與密度修正":
         d_model = max(abs(float(last.get("msis_hi", 0))), abs(float(last.get("msis_lo", 0))))
         m1, m2 = st.columns(2)
         m1.metric("第 45 天：換一組驅動量預報", f"{d_driver:,.0f} km")
-        m2.metric(f"第 45 天：密度模型 ±{at_bias:.0%}", f"{d_model:,.0f} km")
+        m2.metric(f"第 45 天：密度模型 ±1σ", f"{d_model:,.0f} km",
+                  help=at_tag)
+        if not at_ok:
+            st.caption("⚠ 此處的密度不確定度**未經實測校準**。")
 
         st.warning(
             f"**這 {d_driver:,.0f} 公里不是「修正量」，是不確定度。**\n\n"
@@ -1736,6 +1745,13 @@ elif page == "軌道與密度修正":
             f"擂台最佳為 F10.7 {at_stats['f107_persist']:.1f} sfu（持續性）與 "
             f"Ap {at_stats['ap_climatology']:.1f} nT（{at_stats['n_days']} 天氣候平均）。"
             "沿跡差以時間平方成長，故高度越低、天數越長，差距放大得越快。"
+        )
+        st.caption(
+            "密度模型的 1σ 由實測校準（`docs/density_calibration.json`）："
+            "福衛七號精密定軌反演的密度增強倍數 ÷ MSIS 的 storm_ratio，"
+            "799 筆、2023-02→2026-06、10 個事件窗。"
+            "**校準的是散布不是偏差**——兩側基線可能有常數偏移，中位數不可單獨引用。"
+            "散布中也含反演本身的雜訊，故它是模式誤差的上界。"
         )
 
 

@@ -250,7 +250,17 @@ def enhancement_rows(decay: pd.DataFrame, history: pd.Series | None,
         [pd.Series(history.to_numpy(dtype=float), index=pd.DatetimeIndex(history.index)),
          fresh])
     pool = pool[~pool.index.duplicated(keep="last")].sort_index()
-    pool = pool[pool.index > pool.index.max() - pd.Timedelta(days=FIT_WINDOW_D)]
+    # 擬合窗以**這一批資料**的時刻為錨，不是資料池的全域最大值。
+    #
+    # 兩個理由。其一，回填歷史事件窗時，池子裡已經有更晚的資料，
+    # 以全域最大值為錨會拿三年後的平靜期去當 2023 年的基線——實測症狀是
+    # 窗內湊不滿 48 個寧靜分箱，整批回填**一列增強倍數都產不出來**，
+    # 而 DRAG_DECAY 照樣寫入，所以看起來像是「有抓到資料」。
+    # 其二，即使湊得滿，用晚於本批的資料定基線就是前視洩漏——
+    # 這是一個宣稱 inference=observed 的參數，不能有這種東西。
+    anchor = fresh.index.max()
+    pool = pool[(pool.index > anchor - pd.Timedelta(days=FIT_WINDOW_D))
+                & (pool.index <= anchor)]
 
     fit = fit_quiet_baseline(pool, f107, kp)
     if fit is None:

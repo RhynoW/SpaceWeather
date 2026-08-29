@@ -87,6 +87,26 @@ def arena_best_drivers(store: SwxStore, dates) -> tuple[pd.DataFrame, dict]:
                             f107a=float(c81.iloc[-1]) if not c81.empty else None), stats
 
 
+def model_band(fc: pd.DataFrame, epochs, *, override: float | None = None):
+    """密度模型的 ±1σ 倍率（逐時刻），回傳 (上界, 下界, 是否實測, sigma 序列)。
+
+    **逐時刻而非單一常數**：實測顯示暴時的模式散布比平靜期大
+    （ap≥50 的 1σ 為 0.282，ap<10 為 0.223）。用常數會在平靜段高估、
+    暴時段低估，而暴時正是這個帶最有作業意義的時候。
+    """
+    from orbit_drag.calibration import sigma_log
+
+    ap = fc["ap"].reindex(pd.DatetimeIndex(epochs)).ffill().bfill().to_numpy(dtype=float)
+    if override is not None:
+        sig = np.full(len(ap), float(override))
+        calibrated = False
+    else:
+        pairs = [sigma_log(float(a)) for a in ap]
+        sig = np.array([p[0] for p in pairs], dtype=float)
+        calibrated = bool(pairs and all(p[1] for p in pairs))
+    return np.exp(sig), np.exp(-sig), calibrated, sig
+
+
 def main(argv: list[str] | None = None) -> int:
     ap_ = argparse.ArgumentParser(description="驅動量的選擇造成多少沿跡誤差")
     ap_.add_argument("--alt", type=float, default=500.0, help="初始高度 km")
@@ -95,8 +115,10 @@ def main(argv: list[str] | None = None) -> int:
                      help=f"彈道係數 Cd·A/m（m^2/kg）。代表值：{BC_REFERENCE}")
     ap_.add_argument("--lat", type=float, default=0.0, help="密度取樣緯度")
     ap_.add_argument("--lon", type=float, default=0.0, help="密度取樣經度")
-    ap_.add_argument("--model-bias", type=float, default=0.15,
-                     help="密度模型偏差（1 = 100%%）。預設 0.15 為 MSIS 平靜期典型值")
+    ap_.add_argument("--model-bias", type=float, default=None,
+                     help="密度模型 1σ（對數空間）。預設由 "
+                          "docs/density_calibration.json 的實測值逐時刻決定；"
+                          "給定時以此常數覆寫全段")
     args = ap_.parse_args(argv)
 
     store = SwxStore()
@@ -107,12 +129,14 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     best, stats = arena_best_drivers(store, epochs)
-    hi, lo = 1.0 + args.model_bias, 1.0 - args.model_bias
+    hi, lo, calibrated, sig = model_band(fc, epochs, override=args.model_bias)
+    band_label = (f"實測 1σ {sig.min():.2f}–{sig.max():.2f}" if calibrated
+                  else f"未校準經驗值 {sig.mean():.2f}")
     scenarios = [
         Scenario("swpc45", "SWPC 45 日預報", fc),
         Scenario("arena_best", "擂台最佳（F10.7 持續性＋Ap 氣候）", best),
-        Scenario("msis_hi", f"同上驅動，密度 ×{hi:.2f}", fc, rho_scale=hi),
-        Scenario("msis_lo", f"同上驅動，密度 ×{lo:.2f}", fc, rho_scale=lo),
+        Scenario("msis_hi", f"密度 +1σ（{band_label}）", fc, rho_scale=hi),
+        Scenario("msis_lo", f"密度 -1σ（{band_label}）", fc, rho_scale=lo),
     ]
 
     table = compare(scenarios, epochs, args.alt, bc=args.bc, lat=args.lat, lon=args.lon)
@@ -133,15 +157,18 @@ def main(argv: list[str] | None = None) -> int:
         r = pivot.iloc[d - 1]
         rows.append({"天": d,
                      "換驅動量預報（km）": round(float(r["arena_best"]), 1),
-                     "密度 +15%（km）": round(float(r["msis_hi"]), 1),
-                     "密度 -15%（km）": round(float(r["msis_lo"]), 1)})
+                     "密度 +1sigma（km）": round(float(r["msis_hi"]), 1),
+                     "密度 -1sigma（km）": round(float(r["msis_lo"]), 1)})
     print("相對「用 SWPC 45 日預報」的沿跡位置差")
     print(pd.DataFrame(rows).to_string(index=False))
 
     driver = abs(rows[-1]["換驅動量預報（km）"])
-    model = max(abs(rows[-1]["密度 +15%（km）"]), abs(rows[-1]["密度 -15%（km）"]))
+    model = max(abs(rows[-1]["密度 +1sigma（km）"]), abs(rows[-1]["密度 -1sigma（km）"]))
     print()
-    print(f"第 {marks[-1]} 天：換驅動量預報差 {driver:.0f} km，密度模型偏差 ±15% 差 {model:.0f} km。")
+    print(f"第 {marks[-1]} 天：換驅動量預報差 {driver:.0f} km，"
+          f"密度模型 ±1σ（{band_label}）差 {model:.0f} km。")
+    if not calibrated:
+        print("⚠ 密度不確定度**未經實測校準**（缺 docs/density_calibration.json）。")
     print()
     # 這一段是本工具的重點，也最容易被讀反，所以寫死在輸出裡而不是只寫在文件。
     print(f"**這個 {driver:.0f} 公里的差不是「修正量」，是不確定度。**")
