@@ -308,6 +308,9 @@ python -m services.ingest.run --source all --backfill
 python -m services.forecast.run --verify --target f107 --write-summary
 python -m services.forecast.run --verify --target ap --write-summary
 
+# 驅動量的選擇造成多少沿跡誤差（把 sfu／nT 換算成公里）
+python -m tools.alongtrack_drivers --alt 500 --days 45
+
 # 預報引擎的訓練資料（OMNI2，六年）
 python -m services.ingest.run --source omni2_hourly --years 6
 
