@@ -60,12 +60,17 @@ class TargetSpec:
     code: str                      # 參數代碼（swx_observation.param_code）
     #: 事件機率的參數代碼。**不可由 code 拼出來**——Kp 的機率參數註冊為
     #: KP_STORM_PROB 而非 KP_3H_STORM_PROB，拼字串會寫進一個未註冊的參數。
-    prob_code: str
+    #: 連續型目標（F10.7／Ap）沒有事件定義，為 None。
+    prob_code: str | None
     short: str                     # 特徵欄位前綴
     grid: str                      # pandas 頻率字串
     grid_h: float                  # 一格幾小時
     horizons: tuple[int, ...]
-    storm_threshold: float
+    #: 事件門檻。**None 代表這個目標沒有事件定義**，擂台只算連續型指標
+    #: （MAE／RMSE／技巧分數），不算 POD/FAR/BSS 與提前量。
+    #: F10.7 沒有任何作業單位公告的事件尺度，硬訂一個門檻就是自創判據；
+    #: 而軌道預測要的本來就是**值本身**，不是超標與否。
+    storm_threshold: float | None
     lag_hours: tuple[float, ...]
     roll_hours: tuple[float, ...]
     recurrence_days: tuple[int, ...]
@@ -80,6 +85,29 @@ class TargetSpec:
     @property
     def target_col(self) -> str:
         return self.code.lower()
+
+    @property
+    def now_col(self) -> str:
+        """持續性基線要用的欄位：**目標自己**在起報時刻的值。
+
+        寫死 `kp_3h_now` 的後果不會報錯：Hp30 目標的特徵矩陣裡也有 kp_3h_now
+        （Kp 是它的輔助特徵），於是「持續性」基線變成「持續 Kp」，
+        而 skill_vs_persistence 是拿它當分母的——分母錯了，整欄技巧分數都錯。
+        """
+        return f"{self.target_col}_now"
+
+    @property
+    def has_events(self) -> bool:
+        return self.storm_threshold is not None
+
+    def horizon_label(self, hours: float) -> str:
+        """把 horizon 印成人看得懂的單位。
+
+        日格點的目標動輒 1080 小時，印「1080 小時」沒有人讀得出那是 45 天。
+        """
+        if self.grid_h >= 24 and hours >= 24:
+            return f"{hours / 24:g} 天"
+        return f"{hours:g} 小時"
 
     def steps(self, hours: float) -> int:
         """把小時換算為格數（至少 1 格）。"""
@@ -122,7 +150,48 @@ HP30_TARGET = TargetSpec(
     label="Hp30（30 分鐘指數）",
 )
 
-TARGETS = {t.key: t for t in (KP_TARGET, HP30_TARGET)}
+#: F10.7 目標（日格點）。**這是軌道預測實際依賴的驅動量**。
+#:
+#: 為什麼要這一組：本案原本只驗 Kp（3–48 小時）與 Hp30（1–6 小時），
+#: 但熱氣層密度、進而軌道衰減，是由逐日的 F10.7 與 Ap 驅動的，提前量以週計。
+#: 那個尺度上一條驗證都沒有，議題一的 KPI 等於靠別人的預測值撐著。
+#:
+#: horizons 以**小時**表示（全套機具的單位），日格點下 1080 h = 45 天，
+#: 對齊 SWPC 45 日預報的長度，才能與作業基線同場比較。
+F107_TARGET = TargetSpec(
+    key="f107", code="F107_OBS", prob_code=None,
+    short="f107", grid="24h", grid_h=24.0,
+    horizons=(24, 72, 168, 648, 720, 1080),      # 1／3／7／27／30／45 天
+    storm_threshold=None,
+    lag_hours=(24, 48, 72, 168, 648),
+    roll_hours=(168, 648, 1944),                 # 7／27／81 天
+    recurrence_days=(27, 54),
+    geomag_cols=("f107_obs", "ap_avg", "kp_3h"),
+    ffill_hours=48.0,
+    cadence_aware_ffill=True,
+    label="F10.7（太陽電波通量，日值）",
+)
+
+#: Ap 日平均目標（日格點）。與 F10.7 同為阻力驅動量。
+#:
+#: COMSPOC 公開的自家對照顯示：45 天期的 Ap 預測誤差**不隨提前量成長**
+#: （第 7 天與第 60 天同為 8 上下），代表那個尺度的 Ap 預報實質上是氣候值。
+#: 這一組存在的目的就是自己把這件事量出來，而不是引用別人的結論。
+AP_TARGET = TargetSpec(
+    key="ap", code="AP_AVG", prob_code=None,
+    short="ap", grid="24h", grid_h=24.0,
+    horizons=(24, 72, 168, 648, 720, 1080),
+    storm_threshold=None,
+    lag_hours=(24, 48, 72, 168, 648),
+    roll_hours=(168, 648, 1944),
+    recurrence_days=(27, 54),
+    geomag_cols=("ap_avg", "f107_obs", "kp_3h"),
+    ffill_hours=48.0,
+    cadence_aware_ffill=True,
+    label="Ap（地磁日平均）",
+)
+
+TARGETS = {t.key: t for t in (KP_TARGET, HP30_TARGET, F107_TARGET, AP_TARGET)}
 
 
 
@@ -132,6 +201,8 @@ _BASE_PARAMS = ("KP_3H", "AP_3H", "DST", "F107_OBS", "SW_V", "SW_N", "IMF_BZ",
 
 _INGEST_HINT = {
     "KP_3H": "python -m services.ingest.run --source omni2_hourly",
+    "F107_OBS": "python -m services.ingest.run --source celestrak_sw_all",
+    "AP_AVG": "python -m services.ingest.run --source celestrak_sw_all",
     "HP30": ("python -m services.ingest.run --source gfz_hp30 "
              "--reparse --window-days 2100 --backfill"),
 }
@@ -202,6 +273,16 @@ def build_features(panel: pd.DataFrame, spec: TargetSpec = KP_TARGET) -> pd.Data
     f = pd.DataFrame(index=panel.index)
     step = spec.steps
 
+    def roll(series: pd.Series, hours: float, min_periods: int = 2):
+        """滾動視窗。**min_periods 不得超過視窗長度**。
+
+        日格點下 step(24) 只有 1 格，寫死 min_periods=2 會讓 pandas 直接拋
+        `min_periods 2 must be <= window 1`——3 小時格點看不到這個問題，
+        換到日格點才炸。
+        """
+        win = step(hours)
+        return series.rolling(win, min_periods=min(min_periods, win))
+
     # ── 地磁狀態 ────────────────────────────────────────────────────────
     for col in spec.geomag_cols:
         if col not in panel:
@@ -211,14 +292,13 @@ def build_features(panel: pd.DataFrame, spec: TargetSpec = KP_TARGET) -> pd.Data
         for lag_h in spec.lag_hours:
             f[f"{col}_lag{_h(lag_h)}h"] = s.shift(step(lag_h))
         for win_h in spec.roll_hours:
-            win = step(win_h)
-            f[f"{col}_max{_h(win_h)}h"] = s.rolling(win, min_periods=2).max()
-            f[f"{col}_mean{_h(win_h)}h"] = s.rolling(win, min_periods=2).mean()
+            f[f"{col}_max{_h(win_h)}h"] = roll(s, win_h).max()
+            f[f"{col}_mean{_h(win_h)}h"] = roll(s, win_h).mean()
         f[f"{col}_trend24h"] = s - s.shift(step(24))
 
     # Dst 恢復相判別：目前值相對過去 3 天最低點的回升幅度
     if "dst" in panel:
-        dst_min = panel["dst"].rolling(step(72), min_periods=2).min()
+        dst_min = roll(panel["dst"], 72).min()
         f["dst_recovery"] = panel["dst"] - dst_min
         f["dst_min72h"] = dst_min
 
@@ -226,19 +306,19 @@ def build_features(panel: pd.DataFrame, spec: TargetSpec = KP_TARGET) -> pd.Data
     if {"sw_v", "imf_bz"} <= set(panel.columns):
         f["sw_v_now"] = panel["sw_v"]
         f["imf_bz_now"] = panel["imf_bz"]
-        f["imf_bz_min24h"] = panel["imf_bz"].rolling(step(24), min_periods=2).min()
-        f["sw_v_max24h"] = panel["sw_v"].rolling(step(24), min_periods=2).max()
+        f["imf_bz_min24h"] = roll(panel["imf_bz"], 24).min()
+        f["sw_v_max24h"] = roll(panel["sw_v"], 24).max()
         if "sw_n" in panel:
             f["sw_pressure"] = 1.6726e-6 * panel["sw_n"] * panel["sw_v"] ** 2
         coupling = newell_coupling(panel["sw_v"], panel["imf_bz"])
         f["newell_now"] = coupling
-        f["newell_mean24h"] = coupling.rolling(step(24), min_periods=2).mean()
+        f["newell_mean24h"] = roll(coupling, 24).mean()
         # L1 到地球約 30–60 分鐘。在 3 小時格點上這段延遲被格點本身吃掉，
         # 30 分鐘格點才看得見它——1 小時 horizon 的訊號主要來自這裡。
         if spec.grid_h <= 1.0:
             f["imf_bz_lag1h"] = panel["imf_bz"].shift(step(1))
             f["newell_lag1h"] = coupling.shift(step(1))
-            f["newell_max3h"] = coupling.rolling(step(3), min_periods=2).max()
+            f["newell_max3h"] = roll(coupling, 3).max()
 
     # ── 27 日復現（太陽自轉）──────────────────────────────────────────
     # 27 天 = 216 個 3 小時格點。冕洞高速流會週期性回來，這是長 horizon
@@ -249,13 +329,12 @@ def build_features(panel: pd.DataFrame, spec: TargetSpec = KP_TARGET) -> pd.Data
             shifted = panel[tgt].shift(step(days * 24))
             f[f"{spec.short}_recur{days}d"] = shifted
             if days == spec.recurrence_days[0]:
-                f[f"{spec.short}_recur{days}d_max24h"] = shifted.rolling(
-                    step(24), min_periods=2).max()
+                f[f"{spec.short}_recur{days}d_max24h"] = roll(shifted, 24).max()
 
     # ── 太陽活動與時間 ──────────────────────────────────────────────────
     if "f107_obs" in panel:
         f["f107"] = panel["f107_obs"]
-        f["f107_mean81d"] = panel["f107_obs"].rolling(step(81 * 24), min_periods=30).mean()
+        f["f107_mean81d"] = roll(panel["f107_obs"], 81 * 24, min_periods=30).mean()
     for col in ("m_flare_prob", "x_flare_prob"):
         if col in panel:
             f[col] = panel[col]
@@ -282,7 +361,11 @@ def build_dataset(
     """回傳 (X, y, y_storm)，索引為**起報時刻 t**（目標值在 t+horizon）。"""
     f = features if features is not None else build_features(panel, spec)
     y = panel[spec.target_col].shift(-spec.steps(horizon_h))
-    y_storm = (y >= spec.storm_threshold).astype(int)
+    # 無事件定義時回全 NaN 而非全 0：全 0 會被下游當成「都沒有事件」，
+    # 於是 POD 分母為零、BSS 看似有值——一個沒有定義的指標印出數字，
+    # 比它缺席更危險。
+    y_storm = ((y >= spec.storm_threshold).astype(int) if spec.has_events
+               else pd.Series(np.nan, index=y.index))
 
     mask = y.notna() & f.notna().sum(axis=1).gt(len(f.columns) * 0.5)
     return f[mask], y[mask], y_storm[mask]

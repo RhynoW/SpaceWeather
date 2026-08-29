@@ -25,7 +25,10 @@ from services.forecast.models import RecurrenceBaseline, default_models
 def test_hp30_is_the_only_target_with_one_hour_horizon():
     assert 1 in HP30_TARGET.horizons
     assert 1 not in KP_TARGET.horizons, "Kp 為 3 小時指數，不應宣稱 1 小時 horizon"
-    assert set(TARGETS) == {"kp", "hp30"}
+    assert set(TARGETS) == {"kp", "hp30", "f107", "ap"}
+    # 1 小時 horizon 只有 Hp30 有意義：其餘目標的格點都比 1 小時粗，
+    # 宣稱 1 小時預報等於把格點內的變化說成預報技巧。
+    assert not any(1 in t.horizons for k, t in TARGETS.items() if k != "hp30")
 
 
 @pytest.mark.parametrize(

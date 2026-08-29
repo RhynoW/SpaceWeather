@@ -1,6 +1,604 @@
 {
   "schema": 1,
   "targets": {
+    "ap": {
+      "command": "python -m services.forecast.run --verify --target ap --splits 4",
+      "generated_utc": "2026-08-29T01:20:08Z",
+      "grid": "24h",
+      "has_events": false,
+      "horizons": {
+        "1080": {
+          "confidence": 0.3,
+          "event_rate": null,
+          "models": [
+            {
+              "MAE": 7.248,
+              "MAE_hi": 7.865,
+              "MAE_lo": 6.729,
+              "RMSE": 14.655,
+              "model": "climatology",
+              "n": 1644,
+              "skill_vs_persistence": 0.318,
+              "tier": 0
+            },
+            {
+              "MAE": 10.495,
+              "MAE_hi": 11.32,
+              "MAE_lo": 9.762,
+              "RMSE": 19.945,
+              "model": "recurrence27d",
+              "n": 1644,
+              "skill_vs_persistence": 0.013,
+              "tier": 0
+            },
+            {
+              "MAE": 10.63,
+              "MAE_hi": 11.447,
+              "MAE_lo": 9.797,
+              "RMSE": 20.181,
+              "model": "persistence",
+              "n": 1644,
+              "skill_vs_persistence": 0.0,
+              "tier": 0
+            },
+            {
+              "MAE": 8.919,
+              "MAE_hi": 9.494,
+              "MAE_lo": 8.412,
+              "RMSE": 14.997,
+              "model": "gbm",
+              "n": 1644,
+              "skill_vs_persistence": 0.161,
+              "tier": 2
+            }
+          ],
+          "samples": 2018
+        },
+        "168": {
+          "confidence": 0.3,
+          "event_rate": null,
+          "models": [
+            {
+              "MAE": 7.113,
+              "MAE_hi": 7.746,
+              "MAE_lo": 6.522,
+              "RMSE": 14.549,
+              "model": "climatology",
+              "n": 1680,
+              "skill_vs_persistence": 0.327,
+              "tier": 0
+            },
+            {
+              "MAE": 10.567,
+              "MAE_hi": 11.424,
+              "MAE_lo": 9.785,
+              "RMSE": 20.094,
+              "model": "persistence",
+              "n": 1680,
+              "skill_vs_persistence": 0.0,
+              "tier": 0
+            },
+            {
+              "MAE": 10.613,
+              "MAE_hi": 11.424,
+              "MAE_lo": 9.815,
+              "RMSE": 20.188,
+              "model": "recurrence27d",
+              "n": 1680,
+              "skill_vs_persistence": -0.004,
+              "tier": 0
+            },
+            {
+              "MAE": 7.797,
+              "MAE_hi": 8.417,
+              "MAE_lo": 7.246,
+              "RMSE": 14.528,
+              "model": "gbm",
+              "n": 1680,
+              "skill_vs_persistence": 0.262,
+              "tier": 2
+            }
+          ],
+          "samples": 2056
+        },
+        "24": {
+          "confidence": 0.3,
+          "event_rate": null,
+          "models": [
+            {
+              "MAE": 7.161,
+              "MAE_hi": 7.765,
+              "MAE_lo": 6.603,
+              "RMSE": 14.543,
+              "model": "climatology",
+              "n": 1688,
+              "skill_vs_persistence": 0.043,
+              "tier": 0
+            },
+            {
+              "MAE": 7.486,
+              "MAE_hi": 8.149,
+              "MAE_lo": 6.898,
+              "RMSE": 15.044,
+              "model": "persistence",
+              "n": 1688,
+              "skill_vs_persistence": 0.0,
+              "tier": 0
+            },
+            {
+              "MAE": 9.549,
+              "MAE_hi": 10.372,
+              "MAE_lo": 8.811,
+              "RMSE": 19.003,
+              "model": "recurrence27d",
+              "n": 1688,
+              "skill_vs_persistence": -0.276,
+              "tier": 0
+            },
+            {
+              "MAE": 6.406,
+              "MAE_hi": 6.963,
+              "MAE_lo": 5.908,
+              "RMSE": 13.253,
+              "model": "gbm",
+              "n": 1688,
+              "skill_vs_persistence": 0.144,
+              "tier": 2
+            }
+          ],
+          "samples": 2062
+        },
+        "648": {
+          "confidence": 0.3,
+          "event_rate": null,
+          "models": [
+            {
+              "MAE": 7.169,
+              "MAE_hi": 7.809,
+              "MAE_lo": 6.587,
+              "RMSE": 14.631,
+              "model": "climatology",
+              "n": 1660,
+              "skill_vs_persistence": 0.233,
+              "tier": 0
+            },
+            {
+              "MAE": 9.347,
+              "MAE_hi": 10.176,
+              "MAE_lo": 8.514,
+              "RMSE": 19.184,
+              "model": "persistence",
+              "n": 1660,
+              "skill_vs_persistence": 0.0,
+              "tier": 0
+            },
+            {
+              "MAE": 9.823,
+              "MAE_hi": 10.629,
+              "MAE_lo": 9.038,
+              "RMSE": 19.575,
+              "model": "recurrence27d",
+              "n": 1660,
+              "skill_vs_persistence": -0.051,
+              "tier": 0
+            },
+            {
+              "MAE": 7.348,
+              "MAE_hi": 7.944,
+              "MAE_lo": 6.768,
+              "RMSE": 14.273,
+              "model": "gbm",
+              "n": 1660,
+              "skill_vs_persistence": 0.214,
+              "tier": 2
+            }
+          ],
+          "samples": 2036
+        },
+        "72": {
+          "confidence": 0.3,
+          "event_rate": null,
+          "models": [
+            {
+              "MAE": 7.151,
+              "MAE_hi": 7.769,
+              "MAE_lo": 6.551,
+              "RMSE": 14.547,
+              "model": "climatology",
+              "n": 1684,
+              "skill_vs_persistence": 0.302,
+              "tier": 0
+            },
+            {
+              "MAE": 10.239,
+              "MAE_hi": 11.002,
+              "MAE_lo": 9.427,
+              "RMSE": 19.675,
+              "model": "recurrence27d",
+              "n": 1684,
+              "skill_vs_persistence": 0.001,
+              "tier": 0
+            },
+            {
+              "MAE": 10.251,
+              "MAE_hi": 11.077,
+              "MAE_lo": 9.511,
+              "RMSE": 19.504,
+              "model": "persistence",
+              "n": 1684,
+              "skill_vs_persistence": 0.0,
+              "tier": 0
+            },
+            {
+              "MAE": 7.494,
+              "MAE_hi": 8.091,
+              "MAE_lo": 6.916,
+              "RMSE": 14.461,
+              "model": "gbm",
+              "n": 1684,
+              "skill_vs_persistence": 0.269,
+              "tier": 2
+            }
+          ],
+          "samples": 2060
+        },
+        "720": {
+          "confidence": 0.3,
+          "event_rate": null,
+          "models": [
+            {
+              "MAE": 7.189,
+              "MAE_hi": 7.799,
+              "MAE_lo": 6.629,
+              "RMSE": 14.608,
+              "model": "climatology",
+              "n": 1660,
+              "skill_vs_persistence": 0.3,
+              "tier": 0
+            },
+            {
+              "MAE": 10.064,
+              "MAE_hi": 10.884,
+              "MAE_lo": 9.312,
+              "RMSE": 19.592,
+              "model": "recurrence27d",
+              "n": 1660,
+              "skill_vs_persistence": 0.021,
+              "tier": 0
+            },
+            {
+              "MAE": 10.275,
+              "MAE_hi": 11.12,
+              "MAE_lo": 9.506,
+              "RMSE": 19.778,
+              "model": "persistence",
+              "n": 1660,
+              "skill_vs_persistence": 0.0,
+              "tier": 0
+            },
+            {
+              "MAE": 7.72,
+              "MAE_hi": 8.311,
+              "MAE_lo": 7.165,
+              "RMSE": 14.452,
+              "model": "gbm",
+              "n": 1660,
+              "skill_vs_persistence": 0.249,
+              "tier": 2
+            }
+          ],
+          "samples": 2033
+        }
+      },
+      "label": "Ap（地磁日平均）",
+      "objective": "csi",
+      "param_code": "AP_AVG",
+      "sample_span_utc": [
+        "2021-01-01T00:00:00Z",
+        "2026-08-26T00:00:00Z"
+      ],
+      "splits": 4,
+      "storm_threshold": null
+    },
+    "f107": {
+      "command": "python -m services.forecast.run --verify --target f107 --splits 4",
+      "generated_utc": "2026-08-29T01:19:58Z",
+      "grid": "24h",
+      "has_events": false,
+      "horizons": {
+        "1080": {
+          "confidence": 0.3,
+          "event_rate": null,
+          "models": [
+            {
+              "MAE": 31.452,
+              "MAE_hi": 32.887,
+              "MAE_lo": 30.243,
+              "RMSE": 41.909,
+              "model": "persistence",
+              "n": 1644,
+              "skill_vs_persistence": 0.0,
+              "tier": 0
+            },
+            {
+              "MAE": 32.054,
+              "MAE_hi": 33.373,
+              "MAE_lo": 30.874,
+              "RMSE": 42.076,
+              "model": "recurrence27d",
+              "n": 1644,
+              "skill_vs_persistence": -0.019,
+              "tier": 0
+            },
+            {
+              "MAE": 45.259,
+              "MAE_hi": 47.039,
+              "MAE_lo": 43.766,
+              "RMSE": 56.377,
+              "model": "climatology",
+              "n": 1644,
+              "skill_vs_persistence": -0.439,
+              "tier": 0
+            },
+            {
+              "MAE": 37.255,
+              "MAE_hi": 38.828,
+              "MAE_lo": 35.776,
+              "RMSE": 48.207,
+              "model": "gbm",
+              "n": 1644,
+              "skill_vs_persistence": -0.185,
+              "tier": 2
+            }
+          ],
+          "samples": 2018
+        },
+        "168": {
+          "confidence": 0.3,
+          "event_rate": null,
+          "models": [
+            {
+              "MAE": 26.76,
+              "MAE_hi": 27.908,
+              "MAE_lo": 25.561,
+              "RMSE": 35.835,
+              "model": "persistence",
+              "n": 1680,
+              "skill_vs_persistence": 0.0,
+              "tier": 0
+            },
+            {
+              "MAE": 30.029,
+              "MAE_hi": 31.346,
+              "MAE_lo": 28.826,
+              "RMSE": 39.497,
+              "model": "recurrence27d",
+              "n": 1680,
+              "skill_vs_persistence": -0.122,
+              "tier": 0
+            },
+            {
+              "MAE": 46.842,
+              "MAE_hi": 48.463,
+              "MAE_lo": 45.318,
+              "RMSE": 57.717,
+              "model": "climatology",
+              "n": 1680,
+              "skill_vs_persistence": -0.75,
+              "tier": 0
+            },
+            {
+              "MAE": 36.401,
+              "MAE_hi": 37.727,
+              "MAE_lo": 35.017,
+              "RMSE": 46.111,
+              "model": "gbm",
+              "n": 1680,
+              "skill_vs_persistence": -0.36,
+              "tier": 2
+            }
+          ],
+          "samples": 2056
+        },
+        "24": {
+          "confidence": 0.3,
+          "event_rate": null,
+          "models": [
+            {
+              "MAE": 7.747,
+              "MAE_hi": 8.373,
+              "MAE_lo": 7.164,
+              "RMSE": 15.033,
+              "model": "persistence",
+              "n": 1688,
+              "skill_vs_persistence": 0.0,
+              "tier": 0
+            },
+            {
+              "MAE": 24.244,
+              "MAE_hi": 25.44,
+              "MAE_lo": 23.29,
+              "RMSE": 32.811,
+              "model": "recurrence27d",
+              "n": 1688,
+              "skill_vs_persistence": -2.129,
+              "tier": 0
+            },
+            {
+              "MAE": 46.986,
+              "MAE_hi": 48.688,
+              "MAE_lo": 45.362,
+              "RMSE": 57.823,
+              "model": "climatology",
+              "n": 1688,
+              "skill_vs_persistence": -5.065,
+              "tier": 0
+            },
+            {
+              "MAE": 14.765,
+              "MAE_hi": 15.818,
+              "MAE_lo": 13.806,
+              "RMSE": 25.297,
+              "model": "gbm",
+              "n": 1688,
+              "skill_vs_persistence": -0.906,
+              "tier": 2
+            }
+          ],
+          "samples": 2062
+        },
+        "648": {
+          "confidence": 0.3,
+          "event_rate": null,
+          "models": [
+            {
+              "MAE": 23.675,
+              "MAE_hi": 24.659,
+              "MAE_lo": 22.658,
+              "RMSE": 32.123,
+              "model": "persistence",
+              "n": 1660,
+              "skill_vs_persistence": 0.0,
+              "tier": 0
+            },
+            {
+              "MAE": 28.223,
+              "MAE_hi": 29.611,
+              "MAE_lo": 27.067,
+              "RMSE": 38.551,
+              "model": "recurrence27d",
+              "n": 1660,
+              "skill_vs_persistence": -0.192,
+              "tier": 0
+            },
+            {
+              "MAE": 46.01,
+              "MAE_hi": 47.707,
+              "MAE_lo": 44.435,
+              "RMSE": 57.097,
+              "model": "climatology",
+              "n": 1660,
+              "skill_vs_persistence": -0.943,
+              "tier": 0
+            },
+            {
+              "MAE": 30.256,
+              "MAE_hi": 31.589,
+              "MAE_lo": 28.978,
+              "RMSE": 40.495,
+              "model": "gbm",
+              "n": 1660,
+              "skill_vs_persistence": -0.278,
+              "tier": 2
+            }
+          ],
+          "samples": 2036
+        },
+        "72": {
+          "confidence": 0.3,
+          "event_rate": null,
+          "models": [
+            {
+              "MAE": 15.537,
+              "MAE_hi": 16.331,
+              "MAE_lo": 14.748,
+              "RMSE": 22.837,
+              "model": "persistence",
+              "n": 1684,
+              "skill_vs_persistence": 0.0,
+              "tier": 0
+            },
+            {
+              "MAE": 26.165,
+              "MAE_hi": 27.327,
+              "MAE_lo": 25.047,
+              "RMSE": 35.012,
+              "model": "recurrence27d",
+              "n": 1684,
+              "skill_vs_persistence": -0.684,
+              "tier": 0
+            },
+            {
+              "MAE": 47.008,
+              "MAE_hi": 48.73,
+              "MAE_lo": 45.316,
+              "RMSE": 57.856,
+              "model": "climatology",
+              "n": 1684,
+              "skill_vs_persistence": -2.026,
+              "tier": 0
+            },
+            {
+              "MAE": 22.331,
+              "MAE_hi": 23.517,
+              "MAE_lo": 21.194,
+              "RMSE": 32.143,
+              "model": "gbm",
+              "n": 1684,
+              "skill_vs_persistence": -0.437,
+              "tier": 2
+            }
+          ],
+          "samples": 2060
+        },
+        "720": {
+          "confidence": 0.3,
+          "event_rate": null,
+          "models": [
+            {
+              "MAE": 26.188,
+              "MAE_hi": 27.355,
+              "MAE_lo": 25.061,
+              "RMSE": 35.099,
+              "model": "persistence",
+              "n": 1660,
+              "skill_vs_persistence": 0.0,
+              "tier": 0
+            },
+            {
+              "MAE": 28.392,
+              "MAE_hi": 29.787,
+              "MAE_lo": 27.174,
+              "RMSE": 38.838,
+              "model": "recurrence27d",
+              "n": 1660,
+              "skill_vs_persistence": -0.084,
+              "tier": 0
+            },
+            {
+              "MAE": 45.892,
+              "MAE_hi": 47.548,
+              "MAE_lo": 44.47,
+              "RMSE": 56.974,
+              "model": "climatology",
+              "n": 1660,
+              "skill_vs_persistence": -0.752,
+              "tier": 0
+            },
+            {
+              "MAE": 32.163,
+              "MAE_hi": 33.643,
+              "MAE_lo": 30.839,
+              "RMSE": 42.776,
+              "model": "gbm",
+              "n": 1660,
+              "skill_vs_persistence": -0.228,
+              "tier": 2
+            }
+          ],
+          "samples": 2033
+        }
+      },
+      "label": "F10.7（太陽電波通量，日值）",
+      "objective": "csi",
+      "param_code": "F107_OBS",
+      "sample_span_utc": [
+        "2021-01-01T00:00:00Z",
+        "2026-08-26T00:00:00Z"
+      ],
+      "splits": 4,
+      "storm_threshold": null
+    },
     "hp30": {
       "command": "python -m services.forecast.run --verify --target hp30 --splits 5",
       "generated_utc": "2026-08-25T11:21:32Z",

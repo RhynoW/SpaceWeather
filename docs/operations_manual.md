@@ -304,6 +304,10 @@ python -m services.ingest.run --source celestrak_sw_all
 # 首次建庫：回填歷史，ingest_time 依來源發布延遲推算，使 as_of 回放可用
 python -m services.ingest.run --source all --backfill
 
+# 驅動量的長提前量驗證（軌道預測依賴的量，1–45 天）
+python -m services.forecast.run --verify --target f107 --write-summary
+python -m services.forecast.run --verify --target ap --write-summary
+
 # 預報引擎的訓練資料（OMNI2，六年）
 python -m services.ingest.run --source omni2_hourly --years 6
 

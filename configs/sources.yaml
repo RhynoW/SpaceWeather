@@ -15,7 +15,7 @@ defaults:
 sources:
   # ── 已具備（複用 Sat_TraingDataExtension A3/A4/A5）──────────────────────
   - source_id: celestrak_sw_all
-    name: CelesTrak Space Weather (CSSI SW-All)
+    name: CelesTrak Space Weather (CSSI, SW-Last5Years)
     connector: celestrak_sw
     tier: 1
     attribution:
@@ -37,6 +37,11 @@ sources:
     notes: >
       與 Sat_TraingDataExtension/space_weather_ap.csv 同源（該檔為此來源之 CSV 序列化，
       涵蓋 2021-01-01→2041-10-01）。此來源同時是 STK CSSI 匯入檔的資料本體。
+      **source_id 沿用 `celestrak_sw_all`，但端點是 SW-Last5Years.txt**（觀測起自
+      2021-01-01，非 1957 年起的完整檔）——id 已被資料分區與既有報告引用，
+      改名的代價高於誤解的代價，故改在此處講明。
+      要跨越一個以上太陽週期驗證 F10.7 預報時，得改指 SW-All.txt；
+      那會把觀測列數從約 2 千增為約 2.5 萬，屬另案評估。
     publication_lag_s: 86400
 
   - source_id: gfz_nowcast
@@ -266,6 +271,33 @@ sources:
     endpoint: https://services.swpc.noaa.gov/text/27-day-outlook.txt
     format: swpc_27day_txt
     notes: 太陽自轉 27 天，冕洞高速流週期復現，是 24 小時以上 horizon 少數有物理依據的訊號。
+
+  - source_id: swpc_45day_forecast
+    name: NOAA SWPC 45-day Ap and F10.7 forecast
+    connector: forecast_sources
+    tier: 1
+    attribution:
+      provider: 'NOAA/NWS Space Weather Prediction Center'
+      product: '45 日 Ap 與 F10.7 逐日預報（檔內註明 FORECASTER: AUTOMATED）'
+      url: 'https://services.swpc.noaa.gov/text/45-day-forecast.txt'
+      terms: '美國政府公眾領域資料（U.S. Government work, public domain）'
+    status: ready
+    provides: [F107_OBS, AP_AVG]
+    data_types: [PRD]
+    cadence_s: 86400
+    latency_budget_s: 172800
+    publication_lag_s: 0
+    endpoint: https://services.swpc.noaa.gov/text/45-day-forecast.txt
+    format: swpc_45day_txt
+    notes: >
+      **軌道預測實際依賴的驅動量**（逐日 F10.7 與 Ap，提前量以週計），
+      也是 COMSPOC 等業者合成 CSSI 驅動檔時採用的同一份預測來源。
+      本案把它當作預報擂台上**要打敗的作業基線**。
+      **沒有回填管道**：SWPC 只發布當前一份，歷史版本不可取得——
+      故它的實測成績只能自開始輪詢之日起累積，靠資料層 bitemporal
+      （ingest_time + as_of 回放）還原「當時報了什麼」。
+      我們自己的模型可用歷史觀測回測，兩者**不在同一起跑線**，
+      比較時必須載明，不可把「我們有回測、它沒有」說成「我們比較準」。
 
   - source_id: kyoto_dst
     name: Kyoto WDC Dst index (real-time)

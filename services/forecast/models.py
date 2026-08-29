@@ -32,7 +32,8 @@ class Baseline:
     tier = 0
     #: 事件門檻。目標可換（Kp／Hp30），門檻必須跟著換，否則模型學的標籤
     #: 與擂台計分的標籤不是同一個定義——這種錯不會報錯，只會讓分數失真。
-    storm_threshold: float = STORM_THRESHOLD
+    #: None 代表該目標沒有事件定義（F10.7／Ap），此時不得產生機率。
+    storm_threshold: float | None = STORM_THRESHOLD
 
     def fit(self, X: pd.DataFrame, y: pd.Series) -> "Baseline":
         return self
@@ -42,6 +43,8 @@ class Baseline:
 
     def predict_proba_storm(self, X: pd.DataFrame) -> np.ndarray:
         """回傳 P(目標 ≥ 門檻)。基線用經驗分布近似。"""
+        if self.storm_threshold is None:
+            return np.full(len(X), np.nan)
         pred = self.predict(X)
         # 以預測值與門檻的距離做 logistic 轉換；斜率由訓練殘差尺度決定
         scale = getattr(self, "_resid_scale", 1.0)
@@ -49,9 +52,15 @@ class Baseline:
 
 
 class PersistenceBaseline(Baseline):
-    """持續性：預測值 = 起報時刻的觀測值。短 horizon 極難擊敗。"""
+    """持續性：預測值 = 起報時刻的**目標自己**的觀測值。短 horizon 極難擊敗。
+
+    `now_col` 必須跟著目標換。寫死 `kp_3h_now` 不會報錯——Hp30 與 F10.7 的
+    特徵矩陣裡都有 kp_3h_now（Kp 是它們的輔助特徵），於是「持續性」悄悄
+    變成「持續 Kp」。而 skill_vs_persistence 拿它當分母，分母錯了整欄都錯。
+    """
 
     name = "persistence"
+    now_col: str = "kp_3h_now"
 
     def fit(self, X, y):
         pred = self.predict(X)
@@ -59,7 +68,11 @@ class PersistenceBaseline(Baseline):
         return self
 
     def predict(self, X: pd.DataFrame) -> np.ndarray:
-        return X["kp_3h_now"].to_numpy(dtype=float)
+        if self.now_col not in X.columns:
+            # 安靜換一欄比棄權更糟：擂台會照常印出一個「持續性」的分數，
+            # 而它持續的是另一個量。回 NaN 讓這一列在成績表上顯示 skipped。
+            return np.full(len(X), np.nan)
+        return X[self.now_col].to_numpy(dtype=float)
 
 
 class ClimatologyBaseline(Baseline):
@@ -133,7 +146,7 @@ class GbmForecaster:
     learning_rate: float = 0.06
     max_depth: int | None = 6
     random_state: int = 42
-    storm_threshold: float = STORM_THRESHOLD
+    storm_threshold: float | None = STORM_THRESHOLD
     _reg: object = field(default=None, repr=False)
     _clf: object = field(default=None, repr=False)
     _columns: list[str] = field(default_factory=list, repr=False)
@@ -155,6 +168,9 @@ class GbmForecaster:
         )
         self._reg = HistGradientBoostingRegressor(**common).fit(X, y)
 
+        if self.storm_threshold is None:      # 連續型目標：不做事件分類
+            return self
+
         storm = (y >= self.storm_threshold).astype(int)
         # 事件極不平衡（Kp≥5 約佔 3%）；類別數不足時退回只做回歸。
         #
@@ -169,6 +185,8 @@ class GbmForecaster:
         return np.asarray(self._reg.predict(X[self._columns]), dtype=float)
 
     def predict_proba_storm(self, X: pd.DataFrame) -> np.ndarray:
+        if self.storm_threshold is None:
+            return np.full(len(X), np.nan)
         if self._clf is None:
             pred = self.predict(X)
             return 1.0 / (1.0 + np.exp(-(pred - self.storm_threshold)))
@@ -189,10 +207,16 @@ class GbmForecaster:
         )
 
 
-def default_models(storm_threshold: float = STORM_THRESHOLD) -> list:
-    """回傳預設模型組合（基線在前，便於報表排序）。"""
+def default_models(storm_threshold: float | None = STORM_THRESHOLD,
+                   *, now_col: str = "kp_3h_now") -> list:
+    """回傳預設模型組合（基線在前，便於報表排序）。
+
+    `now_col` 是持續性基線要持續的那一欄，隨目標而變（見 TargetSpec.now_col）。
+    """
+    persistence = PersistenceBaseline()
+    persistence.now_col = now_col
     models = [
-        PersistenceBaseline(),
+        persistence,
         ClimatologyBaseline(),
         RecurrenceBaseline(),
         GbmForecaster(storm_threshold=storm_threshold),

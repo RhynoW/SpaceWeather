@@ -4,6 +4,7 @@
     python -m services.forecast.run --verify                 全 horizon 驗證擂台
     python -m services.forecast.run --verify --horizon 48    單一 horizon
     python -m services.forecast.run --verify --target hp30   1／3／6 h（Hp30 格點）
+    python -m services.forecast.run --verify --target f107   1–45 天（日格點，阻力驅動量）
     python -m services.forecast.run --predict                產生預報並寫入資料層
     python -m services.forecast.run --coverage               特徵覆蓋率體檢
 
@@ -20,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 import pandas as pd
 
-from swx_core import DATA_TYPE_FCS, SwxStore, normalize
+from swx_core import DATA_TYPE_FCS, SwxStore, normalize, registry
 
 from .features import (HORIZONS, KP_TARGET, OPERATIONAL_HORIZON_LIMIT_H, TARGETS,
                        TargetSpec, build_dataset, build_features, feature_coverage,
@@ -57,7 +58,7 @@ def cmd_coverage(store: SwxStore, spec: TargetSpec = KP_TARGET) -> int:
     f = build_features(panel, spec)
     cov = feature_coverage(f)
     print(f"特徵數 {len(cov)}，樣本期間 {panel.index.min():%Y-%m-%d} → {panel.index.max():%Y-%m-%d}"
-          f"（{len(panel)} 個 3 小時格點）\n")
+          f"（{len(panel)} 個 {spec.grid} 格點）\n")
     print("覆蓋率最低的 15 個特徵：")
     print(cov.head(15).to_string(index=False))
     low = cov[cov["coverage"] < 0.5]
@@ -80,10 +81,15 @@ def cmd_verify(store: SwxStore, horizons: tuple[int, ...], n_splits: int,
     skill: dict[str, dict] = {}
     for h in horizons:
         X, y, _ = build_dataset(panel, h, features=features, spec=spec)
-        print(f"{RULE}\n【horizon {h} 小時】樣本 {len(X)}，"
-              f"其中 {spec.short}≥{spec.storm_threshold} 佔 "
-              f"{100 * (y >= spec.storm_threshold).mean():.1f}%\n{RULE}")
-        table = evaluate(default_models(spec.storm_threshold), X, y,
+        head = f"{RULE}\n【horizon {spec.horizon_label(h)}】樣本 {len(X)}"
+        if spec.has_events:
+            head += (f"，其中 {spec.short}≥{spec.storm_threshold} 佔 "
+                     f"{100 * (y >= spec.storm_threshold).mean():.1f}%")
+        else:
+            head += f"，目標中位數 {y.median():.1f}（無事件定義，只算連續型指標）"
+        print(f"{head}\n{RULE}")
+        table = evaluate(default_models(spec.storm_threshold, now_col=spec.now_col),
+                         X, y,
                          n_splits=n_splits, objective=objective,
                          storm_threshold=spec.storm_threshold, horizon_h=h,
                          merge_gap_h=max(3.0, 2 * spec.grid_h))
@@ -109,7 +115,8 @@ def cmd_verify(store: SwxStore, horizons: tuple[int, ...], n_splits: int,
         if not ok_rows.empty:
             skill[str(h)] = {
                 "samples": int(len(X)),
-                "event_rate": round(float((y >= spec.storm_threshold).mean()), 4),
+                "event_rate": (round(float((y >= spec.storm_threshold).mean()), 4)
+                               if spec.has_events else None),
                 "confidence": forecast_confidence(h),
                 "models": [
                     {k: (None if pd.isna(r[k]) else
@@ -121,9 +128,12 @@ def cmd_verify(store: SwxStore, horizons: tuple[int, ...], n_splits: int,
 
         best = ok_rows.nsmallest(1, "MAE")
         if not best.empty:
-            row = {"horizon_h": h, "best_model": best.iloc[0]["model"],
-                   "MAE": best.iloc[0]["MAE"], "POD": best.iloc[0]["POD"],
-                   "FAR": best.iloc[0]["FAR"]}
+            row = {"horizon": spec.horizon_label(h), "horizon_h": h,
+                   "best_model": best.iloc[0]["model"],
+                   "MAE": best.iloc[0]["MAE"], "RMSE": best.iloc[0]["RMSE"]}
+            for col in ("POD", "FAR"):
+                if col in best.columns:
+                    row[col] = best.iloc[0][col]
             for col in ("ep_recall", "lead_h_med", "lead_n"):
                 if col in best.columns:
                     row[col] = best.iloc[0][col]
@@ -132,14 +142,20 @@ def cmd_verify(store: SwxStore, horizons: tuple[int, ...], n_splits: int,
     if summary:
         print(f"{RULE}\n各 horizon 最佳模型\n{RULE}")
         print(pd.DataFrame(summary).to_string(index=False))
-        print("\n提前量以事件段計：告警的目標時刻落在事件段內才算命中，"
-              "提前量 = horizon −（首次命中的目標時刻 − 事件起始），上限即 horizon。")
-        print("lead_n 為可算出提前量的事件段數；只看提前量不看 ep_recall 會誤讀。")
-        print("\n判讀：技巧隨 horizon 下降的主因是 L1 太陽風僅約 30–60 分鐘先導期，")
-        print("超過此範圍已無即時觀測可用，24 小時以上主要靠 27 日復現與氣候態。")
-        print(f"但本結果僅代表**此配置**（單一模型族、目標為 {spec.label}、"
-              "無 CME 到達資訊），")
-        print("不足以斷言長 horizon 不可能有技巧。")
+        if not spec.has_events:
+            print("\n此目標無事件定義（無作業單位公告的 F10.7／Ap 事件尺度），"
+                  "故只有連續型指標。")
+            print("軌道預測要的本來就是驅動量的**值**，不是超標與否——"
+                  "MAE 隨提前量的成長曲線就是它的作業意義。")
+        else:
+            print("\n提前量以事件段計：告警的目標時刻落在事件段內才算命中，"
+                  "提前量 = horizon −（首次命中的目標時刻 − 事件起始），上限即 horizon。")
+            print("lead_n 為可算出提前量的事件段數；只看提前量不看 ep_recall 會誤讀。")
+            print("\n判讀：技巧隨 horizon 下降的主因是 L1 太陽風僅約 30–60 分鐘先導期，")
+            print("超過此範圍已無即時觀測可用，24 小時以上主要靠 27 日復現與氣候態。")
+            print(f"但本結果僅代表**此配置**（單一模型族、目標為 {spec.label}、"
+                  "無 CME 到達資訊），")
+            print("不足以斷言長 horizon 不可能有技巧。")
 
     if write_summary and skill:
         meta = {
@@ -147,6 +163,7 @@ def cmd_verify(store: SwxStore, horizons: tuple[int, ...], n_splits: int,
             "param_code": spec.code,
             "grid": spec.grid,
             "storm_threshold": spec.storm_threshold,
+            "has_events": spec.has_events,
             "splits": n_splits,
             "objective": objective,
             "sample_span_utc": [f"{panel.index.min():%Y-%m-%dT%H:%M:%SZ}",
@@ -197,8 +214,9 @@ def cmd_predict(store: SwxStore, horizons: tuple[int, ...], write: bool,
         print(f"⚠ 資料已落後 {stale_h:.0f} 小時，以下預報的目標時刻皆為過去，"
               "僅供流程驗證，不可作為現況判讀。")
     print()
+    prob_head = (f"P(≥{spec.storm_threshold:g})" if spec.has_events else "—")
     print(f"{'horizon':>8} {'目標時刻':<20} {spec.short + ' 預報':>10} "
-          f"{'P(≥' + format(spec.storm_threshold, 'g') + ')':>9}  模型")
+          f"{prob_head:>9}  模型")
     for h in horizons:
         X, y, _ = build_dataset(panel, h, features=features, spec=spec)
         if len(X) < 500:
@@ -212,21 +230,26 @@ def cmd_predict(store: SwxStore, horizons: tuple[int, ...], write: bool,
             continue
 
         value = float(model.predict(latest)[0])
-        prob = float(model.predict_proba_storm(latest)[0])
+        prob = float(model.predict_proba_storm(latest)[0]) if spec.has_events else float("nan")
         target = latest.index[0] + pd.Timedelta(hours=h)
-        print(f"{h:>6}h  {target:%Y-%m-%d %H:%MZ}  {value:>10.2f} {prob:>9.1%}  gbm")
+        shown = f"{prob:>9.1%}" if spec.has_events else f"{'—':>9}"
+        print(f"{h:>6}h  {target:%Y-%m-%d %H:%MZ}  {value:>10.2f} {shown}  gbm")
 
-        recs.extend(
-            [
-                {"valid_time": target, "param_code": spec.code, "value": round(value, 2),
-                 "unit": "1", "source_id": "swx_forecast", "source_tier": 1,
-                 "data_type": DATA_TYPE_FCS, "confidence": forecast_confidence(h)},
+        # 單位取自參數註冊表。寫死 "1" 會讓 F10.7 的預報列標成無單位，
+        # 與同一參數的觀測列單位不一致，跨源比對時就對不起來。
+        unit = getattr(registry().get(spec.code), "unit", None) or "1"
+        recs.append(
+            {"valid_time": target, "param_code": spec.code, "value": round(value, 2),
+             "unit": unit, "source_id": "swx_forecast", "source_tier": 1,
+             "data_type": DATA_TYPE_FCS, "confidence": forecast_confidence(h)}
+        )
+        if spec.prob_code is not None:
+            recs.append(
                 {"valid_time": target, "param_code": spec.prob_code,
                  "value": round(prob, 4),
                  "unit": "1", "source_id": "swx_forecast", "source_tier": 1,
-                 "data_type": DATA_TYPE_FCS, "confidence": forecast_confidence(h)},
-            ]
-        )
+                 "data_type": DATA_TYPE_FCS, "confidence": forecast_confidence(h)}
+            )
 
     if recs and write:
         result = store.write(normalize(pd.DataFrame(recs)), source_id="swx_forecast")
@@ -238,7 +261,8 @@ def cmd_predict(store: SwxStore, horizons: tuple[int, ...], write: bool,
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="SWX-SDA 短時預報引擎（Kp 3–48 h／Hp30 1–6 h）")
+    ap = argparse.ArgumentParser(
+        description="SWX-SDA 預報引擎（Kp 3–48 h／Hp30 1–6 h／F10.7 與 Ap 1–45 天）")
     ap.add_argument("--verify", action="store_true", help="執行驗證擂台")
     ap.add_argument("--predict", action="store_true", help="產生最新預報")
     ap.add_argument("--coverage", action="store_true", help="特徵覆蓋率體檢")
@@ -252,8 +276,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--write-summary", action="store_true",
                     help="把驗證成績寫入 docs/forecast_skill.json，供 API 與儀表板引用")
     ap.add_argument("--target", default="kp", choices=sorted(TARGETS),
-                    help="預報目標：kp（3 小時格點，3–48 h）或 hp30"
-                         "（30 分鐘格點，1／3／6 h——構想書要求的 1 小時產品在此）")
+                    help="預報目標：kp（3 小時格點，3–48 h）、hp30（30 分鐘格點，"
+                         "1／3／6 h——構想書要求的 1 小時產品在此）、"
+                         "f107 與 ap（日格點，1–45 天——軌道預測依賴的驅動量，"
+                         "無事件定義，只有連續型指標）")
     args = ap.parse_args(argv)
 
     store = SwxStore()
