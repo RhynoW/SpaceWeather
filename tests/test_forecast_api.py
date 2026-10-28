@@ -53,6 +53,10 @@ def app(tmp_path, monkeypatch):
                {"label": "Kp", "splits": 4, "generated_utc": "2026-08-25T00:00:00Z"},
                path=skill)
     monkeypatch.setattr("services.forecast.skill.SKILL_PATH", skill)
+    # 時鐘固定在素材之後一小時。端點以「現在」往前 30 天查詢，若用牆鐘，
+    # 寫死在 2026-08-18 的素材會在 09-17 之後掉出視窗，測試便靜默地變成
+    # 在測「查無資料」，而非原本要測的格點對齊與技巧數字。
+    monkeypatch.setattr("services.api.app._now", lambda: ISSUED + pd.Timedelta(hours=1))
     return create_app(store)
 
 
