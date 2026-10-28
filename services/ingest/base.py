@@ -252,3 +252,44 @@ class Connector(ABC):
         out["source_id"] = self.spec.source_id
         out["source_tier"] = self.spec.tier
         return out
+
+
+# ── 擷取失敗的判讀 ──────────────────────────────────────────────────────
+#: (類別, 錯誤訊息中的特徵字樣, 判讀)。依序比對，**先比的優先**。
+#:
+#: 存在理由：失敗要能說出「在連線的哪一層斷掉」，因為每一層該找的人不同。
+#: 先前畫面一律寫「多半是 WAF 或憑證鏈」，而 2026-10-28 雲端實際的錯誤是
+#: ConnectTimeout——TCP 都沒連上，根本還沒到 TLS，也不是 WAF（WAF 會回 403）。
+#: 籠統的提示把人導向錯的方向，這與 astropy 事件是同一類失效。
+_FAILURE_LAYERS: tuple[tuple[str, tuple[str, ...], str], ...] = (
+    ("dns", ("NameResolutionError", "getaddrinfo failed", "Name or service not known",
+             "Temporary failure in name resolution", "nodename nor servname"),
+     "**網域名稱解析失敗**：本主機查不到對方的位址。查 DNS 設定或主機名是否改變。"),
+    ("network", ("ConnectTimeout", "NewConnectionError", "Connection refused",
+                 "Network is unreachable", "No route to host"),
+     "**TCP 連線未建立**：還沒進入 TLS，所以不是憑證問題；也不像 WAF（WAF 通常回 403）。"
+     "封包在網路層就被丟棄，多半是對方只放行特定來源位址（例如國內 IP）。"
+     "**這無法由程式修正**，須改由能連線的主機擷取。若本機正常而雲端失敗即屬此類——"
+     "可在該站台以 `SWX_DISABLE_SOURCES` 停用此來源。"),
+    ("tls", ("SSLError", "CERTIFICATE_VERIFY_FAILED", "certificate verify failed",
+             "SSLCertVerificationError"),
+     "**TLS 憑證驗證失敗**：連線已建立，但憑證鏈不被信任。檢查該來源是否需要 "
+     "`tls_relaxed_strict`，或對方憑證是否更換。"),
+    ("blocked", ("403 Client Error", "Forbidden"),
+     "**對方拒絕存取（HTTP 403）**：連線與 TLS 都正常，是對方的 WAF 或存取政策擋下"
+     "本主機的來源位址或請求特徵。"),
+    ("slow", ("ReadTimeout", "Read timed out"),
+     "**已連上但回應逾時**：對方站台忙碌或回應過慢，通常是暫時性的，稍後重試。"),
+)
+
+
+def diagnose_fetch_failure(detail: str) -> tuple[str, str]:
+    """由擷取失敗的錯誤原文判斷斷在哪一層，回傳 (類別, 判讀)。
+
+    類別為 dns／network／tls／blocked／slow／unknown。判讀不出來時回 unknown，
+    **不猜**——寧可說「看不出來」，也不給一個聽起來合理卻指錯方向的答案。
+    """
+    for kind, marks, hint in _FAILURE_LAYERS:
+        if any(m in detail for m in marks):
+            return kind, hint
+    return "unknown", "**無法由錯誤訊息判斷成因**，請依下方原文排查。"

@@ -1331,9 +1331,8 @@ elif page == "RTK 現場查核":
                         "來源未納入自動更新——請確認 `sources.yaml` 的 "
                         "`nlsc_egnss_i95` 為 `ready`，且環境變數 "
                         "`SWX_DISABLE_SOURCES` 未包含它。"),
-            "failed": ("**I95 擷取失敗。**",
-                       "多半是連外受限（對方站台的 WAF 會拒絕非預期的來源位址）"
-                       "或憑證鏈問題。本機可執行 `python tools/i95_smoke.py` 對照。"),
+            # failed 的提示不寫死：依錯誤原文判斷斷在哪一層（見下方）
+            "failed": ("**I95 擷取失敗。**", ""),
             "empty": ("**I95 擷取成功，但沒有取到數值。**",
                       "官方只以圖表發布，這通常代表**版面已改版**，"
                       "或當下三個網的圖都尚未產生。"),
@@ -1343,6 +1342,10 @@ elif page == "RTK 現場查核":
                         "側欄按「更新」，或等待開站時的背景更新完成。"),
         }
         head, hint = WHY.get(state, WHY["not_run"])
+        if state == "failed":
+            from services.ingest.base import diagnose_fetch_failure
+            _, layer = diagnose_fetch_failure(detail)
+            hint = f"{layer} 本機可執行 `python tools/i95_smoke.py` 對照。"
         st.info(
             f"{head} {hint}\n\n"
             f"最近一次自動更新對 `nlsc_egnss_i95` 的結果：**{state}** — {detail}\n\n"
