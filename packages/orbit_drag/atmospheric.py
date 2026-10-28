@@ -216,7 +216,8 @@ def drag_residual(df: pd.DataFrame, sw: pd.DataFrame | None = None) -> pd.DataFr
         else np.zeros(len(a))
     )
     t = pd.to_datetime(d["epoch"], utc=True)
-    dt_s = np.diff(t.astype("int64").to_numpy()) / 1e9
+    # 不用 int64／1e9：那會假設解析度為奈秒，pandas 3 的微秒預設會差 1000 倍。
+    dt_s = t.diff().dt.total_seconds().to_numpy()[1:]
     da = np.diff(a)
 
     # King-Hele：阻力主要作用於近地點 → 於近地點高度取密度

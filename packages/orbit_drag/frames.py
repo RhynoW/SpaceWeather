@@ -93,7 +93,10 @@ def _polar(xp: np.ndarray, yp: np.ndarray) -> np.ndarray:
 
 
 def _mjd(times) -> np.ndarray:
-    t = pd.DatetimeIndex(times)
+    # `.as_unit("ns")` 不可省：pandas 3 起 DatetimeIndex 的預設解析度為微秒，
+    # 少了這步，除以 86400e9 會差 1000 倍——而且**不會報錯**，只會靜默算錯，
+    # 實測可達 1.2e7 公尺。tests/test_frames.py 的固化參考值是唯一的守門。
+    t = pd.DatetimeIndex(times).as_unit("ns")
     return np.asarray(t.view("int64"), dtype=float) / 86400e9 + 40587.0
 
 

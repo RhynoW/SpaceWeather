@@ -22,7 +22,9 @@ pytest.importorskip("pymsis", reason="沿跡推算需要 MSIS")
 
 def _epochs(n: int = 16, unit: str = "ns") -> pd.DatetimeIndex:
     idx = pd.date_range("2026-03-01", periods=n, freq="24h", tz="UTC")
-    return idx.as_unit(unit) if unit != "ns" else idx
+    # 一律轉換：pandas 3 的 date_range 預設給微秒，若沿用「ns 時不轉」的寫法，
+    # ns 與 us 兩組素材會變成同一組，這個測試就靜默停止檢驗解析度差異。
+    return idx.as_unit(unit)
 
 
 # ── 時間解析度 ──────────────────────────────────────────────────────────
