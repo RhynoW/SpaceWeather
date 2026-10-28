@@ -1343,8 +1343,13 @@ elif page == "RTK 現場查核":
         }
         head, hint = WHY.get(state, WHY["not_run"])
         if state == "failed":
-            from services.ingest.base import diagnose_fetch_failure
-            _, layer = diagnose_fetch_failure(detail)
+            # Streamlit Cloud 拉新版時只重跑本檔，已載入的模組仍是舊版；
+            # 舊模組沒有這個函式時退回不猜成因的說法，別讓診斷本身讓整頁崩潰。
+            try:
+                from services.ingest.base import diagnose_fetch_failure
+                _, layer = diagnose_fetch_failure(detail)
+            except ImportError:
+                layer = "無法判讀成因（站台模組版本不一致，Reboot 後即恢復）。"
             hint = f"{layer} 本機可執行 `python tools/i95_smoke.py` 對照。"
         st.info(
             f"{head} {hint}\n\n"
