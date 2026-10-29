@@ -463,6 +463,34 @@ def source_refresh_note(source_id: str) -> tuple[str, str]:
     return result.status_of(source_id)
 
 
+I95_ILLUSTRATIVE = "示意資料，非 NLSC 實測"
+
+
+def i95_illustration() -> pd.DataFrame:
+    """I95 顯示方式的示意序列：48 小時、三個網，數值全由公式造出。
+
+    授權核准前，NLSC 的原始圖檔與衍生數值不得進公開版控或示範快照，
+    雲端站台又連不上對方（只放行國內位址）——頁面上便沒有任何 I95 可看。
+    這組數字只用來展示「有資料時頁面長什麼樣」，形狀取電離層的一般日變化
+    （午後達峰、夜間回落），**不取自任何實測**，也刻意不寫入 store：
+    進了 store 就會被風險引擎當成觀測值，那正是本案要防的靜默失效。
+    時間軸用「第幾小時」而非日期，免得被讀成某一天的實況。
+    """
+    import numpy as np
+
+    rng = np.random.default_rng(95)
+    hours = np.arange(48)
+    # 兩個午後峰，第二天較強；視窗止於第二峰剛過，讓三張卡片分落 L1／L2／L3
+    peak = np.where(hours < 24, 14.0, 26.0)
+    diurnal = peak * np.exp(-0.5 * (((hours % 24) - 22) / 2.5) ** 2)
+    rows = []
+    for grid, scale in (("RTKVRSNet", 1.0), ("Kinmen", 0.4), ("Peng_Hu", 1.25)):
+        v = 3.0 + scale * diurnal + rng.normal(0, 0.8, hours.size)
+        rows.append(pd.DataFrame({"hour": hours, "grid_id": grid,
+                                  "value": np.clip(v, 0.5, None).round(1)}))
+    return pd.concat(rows, ignore_index=True)
+
+
 def refresh_status_line() -> None:
     """側欄顯示資料齡期與更新狀態，並提供手動更新。"""
     from services.ingest.refresh import data_age_s, live_sources
@@ -1321,6 +1349,46 @@ elif page == "RTK 現場查核":
             return "L1", "超過警戒值 8：仍為可作業時段，需留意"
         return "L0", "低於警戒值"
 
+    def _i95_view(df: pd.DataFrame, *, illustrative: bool) -> None:
+        """三個網的最新值卡片＋時序圖。示意模式下每張卡與圖都蓋上標記，
+        截圖單獨流出時也不會被當成實測。"""
+        x = "hour" if illustrative else "valid_time"
+        latest = (df.sort_values(x).groupby("grid_id").tail(1).sort_values("grid_id"))
+        cols = st.columns(len(latest))
+        names = {"RTKVRSNet": "臺灣本島 VRS", "Kinmen": "金門", "Peng_Hu": "澎湖"}
+        for col, (_, row) in zip(cols, latest.iterrows()):
+            level, note = _band(float(row["value"]))
+            color = LEVEL_COLOR.get(level, "#888")
+            when = (f"<small style='color:#d84315'>{I95_ILLUSTRATIVE}</small>"
+                    if illustrative else
+                    f"<small>{pd.Timestamp(row['valid_time']):%m-%d %H:%M}Z</small>")
+            border = "border:2px dashed #888;" if illustrative else ""
+            with col:
+                st.markdown(
+                    f"<div style='padding:14px;border-radius:8px;background:#2b2b2b;{border}"
+                    f"border-left:6px solid {color}'>"
+                    f"<b>{names.get(row['grid_id'], row['grid_id'])}</b><br>"
+                    f"<span style='font-size:2em;color:{color}'>{row['value']:.1f}</span>"
+                    f"<br><small>{level}｜{note}</small><br>{when}</div>",
+                    unsafe_allow_html=True,
+                )
+        if not illustrative:
+            st.caption(
+                "數值由官方圖表擷取（非官方衍生值，精度約 ±0.5，quality_flag=suspect）。"
+                "分級規則只以**臺灣本島 VRS 網**判讀——本島作業不該因澎湖網的尖峰被判為嚴重。"
+            )
+        fig = px.bar(df.sort_values(x), x=x, y="value", color="grid_id", barmode="group")
+        for y, c in ((8, "#e8a33d"), (20, "#d84315"), (30, "#b71c1c")):
+            fig.add_hline(y=y, line_dash="dash", line_color=c,
+                          annotation_text=f"I95 {y}")
+        if illustrative:
+            fig.add_annotation(text=I95_ILLUSTRATIVE, xref="paper", yref="paper",
+                               x=0.5, y=0.5, showarrow=False, textangle=-15,
+                               font=dict(size=36, color="rgba(216,67,21,0.35)"))
+        fig.update_layout(height=320, margin=dict(l=0, r=0, t=10, b=0), yaxis_title="I95",
+                          xaxis_title="示意時段（小時）" if illustrative else "")
+        st.plotly_chart(fig, width='stretch')
+
     if i95.empty:
         # 空白必須說出成因。這一頁在雲端站台上沒有終端機可用，
         # 畫面不講原因，值勤的人就只能猜「是還沒抓、抓失敗、還是抓到了沒資料」。
@@ -1342,6 +1410,13 @@ elif page == "RTK 現場查核":
                         "側欄按「更新」，或等待開站時的背景更新完成。"),
         }
         head, hint = WHY.get(state, WHY["not_run"])
+        from services.ingest.refresh import disabled_sources
+        if "nlsc_egnss_i95" in disabled_sources():
+            # 停用是設定事實，不論更新跑了沒都成立；也不能再叫人「確認它未被停用」
+            head, hint = ("**本站台以 `SWX_DISABLE_SOURCES` 停用 I95。**",
+                          "國土測繪中心主機只接受國內連線，本站台位於境外、無法擷取；"
+                          "且數值授權仍在申請中。即時 I95 請於國內主機執行本系統，"
+                          "或執行 `python tools/i95_smoke.py`。")
         if state == "failed":
             # Streamlit Cloud 拉新版時只重跑本檔，已載入的模組仍是舊版；
             # 舊模組沒有這個函式時退回不猜成因的說法，別讓診斷本身讓整頁崩潰。
@@ -1358,36 +1433,16 @@ elif page == "RTK 現場查核":
             "地磁與閃焰等間接判據見「值勤模式」頁，但**間接判據不足以判斷 RTK 可否作業**"
             "（2026-08-26 實測：Kp≤0.67 的平靜日，I95 仍整個下午超過警戒值）。"
         )
-    else:
-        latest = (i95.sort_values("valid_time").groupby("grid_id").tail(1)
-                  .sort_values("grid_id"))
-        cols = st.columns(len(latest))
-        names = {"RTKVRSNet": "臺灣本島 VRS", "Kinmen": "金門", "Peng_Hu": "澎湖"}
-        for col, (_, row) in zip(cols, latest.iterrows()):
-            level, note = _band(float(row["value"]))
-            color = LEVEL_COLOR.get(level, "#888")
-            with col:
-                st.markdown(
-                    f"<div style='padding:14px;border-radius:8px;background:#2b2b2b;"
-                    f"border-left:6px solid {color}'>"
-                    f"<b>{names.get(row['grid_id'], row['grid_id'])}</b><br>"
-                    f"<span style='font-size:2em;color:{color}'>{row['value']:.1f}</span>"
-                    f"<br><small>{level}｜{note}</small>"
-                    f"<br><small>{pd.Timestamp(row['valid_time']):%m-%d %H:%M}Z</small></div>",
-                    unsafe_allow_html=True,
-                )
-        st.caption(
-            "數值由官方圖表擷取（非官方衍生值，精度約 ±0.5，quality_flag=suspect）。"
-            "分級規則只以**臺灣本島 VRS 網**判讀——本島作業不該因澎湖網的尖峰被判為嚴重。"
+        st.markdown(f"##### 有資料時的顯示方式　<span style='color:#d84315'>"
+                    f"【{I95_ILLUSTRATIVE}】</span>", unsafe_allow_html=True)
+        st.warning(
+            f"**以下為{I95_ILLUSTRATIVE}。** 數值由公式造出（午後達峰的一般日變化），"
+            "不取自國土測繪中心的任何圖表或數值，**不可據以判斷現場能否作業**。"
+            "僅展示取得授權並由國內主機擷取後，本頁如何呈現三個網的 I95 與分級。"
         )
-        fig = px.bar(i95.sort_values("valid_time"), x="valid_time", y="value",
-                     color="grid_id", barmode="group")
-        for y, c in ((8, "#e8a33d"), (20, "#d84315"), (30, "#b71c1c")):
-            fig.add_hline(y=y, line_dash="dash", line_color=c,
-                          annotation_text=f"I95 {y}")
-        fig.update_layout(height=320, margin=dict(l=0, r=0, t=10, b=0),
-                          yaxis_title="I95", xaxis_title="")
-        st.plotly_chart(fig, width='stretch')
+        _i95_view(i95_illustration(), illustrative=True)
+    else:
+        _i95_view(i95, illustrative=False)
 
     st.info(
         f"**門檻出處：{i95_src.get('authority', '—')}**　"

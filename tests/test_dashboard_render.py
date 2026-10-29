@@ -72,6 +72,14 @@ def test_rtk_page_says_why_i95_is_missing(tmp_path, monkeypatch):
     assert any(code in text for code in
                ("running", "skipped", "failed", "empty", "ok", "not_run")),         "空狀態沒有說出更新結果的狀態碼"
 
+    # 刻意停用時，不能再叫人去「確認它未被停用」
+    assert "停用 I95" in text and "未包含它" not in text
+
+    # 示意圖必須蓋章，且**不得**落進資料層——進了 store 就會被當成觀測值
+    stamp = "示意資料，非 NLSC 實測"
+    assert any(stamp in str(w.value) for w in app.warning), "示意區塊缺少標記"
+    assert not list(tmp_path.rglob("*I95*")), "示意 I95 被寫進了資料層"
+
 
 def test_sidebar_offers_every_documented_page():
     """側欄實際提供的選項要與文件一致（與 test_dashboard_pages 的靜態檢查互補）。"""
