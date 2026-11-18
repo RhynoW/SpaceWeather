@@ -702,6 +702,7 @@ SpaceWeather/
 | G5 | **展示行程自行對外擷取，與 P7 內外網分離衝突**（§12） | 儀表板開站即背景擷取（雲端示範站需要，作業區不應有出向連線） | `SWX_DASHBOARD_INGEST=off` 停用儀表板擷取；預設維持 `on`，雲端行為不變 | — |
 | G6 | **儀表板繞過 API，違反 §4 治理規則**（原 R1） | 儀表板直接 import `RiskEngine`、`build_event_cards`、`stk_spaceweather`、`drag_correction`；API 另組一份參數。預報頁把可能為 None 的 `prob_code` 放進查詢清單（API 已修、儀表板未修）；事件卡頁同一段回放算兩次、其一未快取 | 新增產品層 `services/products.py`：nowcast、規則評估、事件卡、閃焰清單、預報視圖（`forecast_view`：查詢窗、錨點對齊格點）、STK／阻力匯出。API 與儀表板皆改經此層 | `tests/test_products_boundary.py`：AST 掃描禁止 `apps/`、`services/api` 直接 import `risk_engine`／`exporter`；API 與產品層輸出逐欄比對 |
 | G7 | **`notify` 欄位沒有投遞機制**（原 R2；§3「告警推播」） | 規則 YAML 與事件卡都帶 `notify`，全專案無投遞程式；§14「L3 以上 30 分鐘內發布」無從計時 | transactional outbox：`issue()` 在**同一交易**依 `configs/notify.yaml` 寫入待送訊息（角色×通道），發布與待送同生同滅；`services.notify.dispatch` 另行投遞（`file` 給單向傳輸、`webhook` 給內網閘道，URL 只從環境變數讀），指數退避重試、租約防卡死、超限標 failed，送達與失敗皆入稽核表；未定義路由的角色留下可見的 failed 而非靜默略過；訊息本身標 `is_demo`；`GET /v1/events/{id}/notifications` 回報 `issue_latency_s` 與逐筆 `delivery_s` | `tests/test_notify.py`（含：規則角色皆有路由、交易回滾、重試至放棄、租約收回） |
+| G8 | **每次查詢全掃 Parquet**（原 R6） | 查詢只依參數挑目錄，時間窗再短也開啟該參數全部年份的檔；`latest()` 無時間界、全掃歷史；規則引擎每條規則各自查詢，一次 nowcast 發 33 次查詢（Kp 被查 6 次）；另發現相同 (來源, ingest_time) 再寫入會**覆寫**前一檔，加上 dedupe 只寫差異列時前一批未變動列會靜默消失 | 依 valid_time **裁剪分區**（分區鍵即 valid_time，不重疊者不可能有列）；`latest()` 由新到舊逐分區找到即停，年月分區混用或名稱無法辨識時退回全掃；規則引擎**單輪快取**（只在一次 `evaluate()` 內，不跨輪）；同名檔改加序號另存。實測（示範快照）：nowcast 1,445→485 ms、7 日規則回放 1,169→154 ms、`latest` 261→72 ms；碎檔多的分區另需 G4 合併（本機合併後短窗查詢 99→24 ms、`health()` 311→122 ms） | `tests/test_query_pruning.py`：裁剪與全掃逐列比對（年界、含端點 end、單點窗、as_of）、`latest` 與全掃比對（含年月混用、最新分區僅有拒收列）、快取與逐條規則結果比對、新資料下一輪可見、每序列每輪只查一次、同名不覆寫 |
 
 ### 尚未修正（依建議順序）
 
@@ -711,7 +712,6 @@ SpaceWeather/
 | R3 | **部署產物不存在**（§12 寫 Docker Compose 三區） | 無 Dockerfile／compose；API 以 Flask 開發伺服器 `app.run()` 啟動 | 無法示範 Zone A/B/C；開發伺服器不適合作業負載 | compose 三服務對應分區：`collector`（Zone A，唯一有出向網路）、`api`＋`dashboard`（Zone B，`network_mode: internal`、`SWX_DASHBOARD_INGEST=off`）；API 改以 waitress 啟動（Windows 相容） |
 | R4 | **OpenAPI 規格未產出**（§12 技術選型寫 apispec） | 契約只由 `tests/test_api_contract.py` 的端點集合守住，無機器可讀規格 | 介接方（SDA 平臺、STK 工作站）須讀 README 開發 | 產生 `docs/openapi.json` 並由契約測試比對端點集合，與 `forecast_skill.json` 同一模式 |
 | R5 | **CORS 全開** | `CORS(app, resources={r"/v1/*": {"origins": "*"}})` | 對外唯讀示範可接受；作業區應限定來源 | 以 `SWX_API_CORS_ORIGINS` 設定，未設時不啟用 CORS |
-| R6 | **每次查詢全掃 Parquet** | `SwxStore.connect()` 為記憶體連線，每次 `read_parquet` 全部分區 | 目前 15 MB 無感；接入格網型 TEC/S4 後成本線性上升 | 先靠 G4 控制檔數；格網資料上線時再加「最新值」物化表 |
 
 ## 17. 最先要做的五件事（117 年前兩個月）
 

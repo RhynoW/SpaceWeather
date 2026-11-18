@@ -41,6 +41,13 @@ from .schema import (
 _VALUE_EPS = 1e-12
 
 
+def _utc(ts) -> pd.Timestamp | None:
+    if ts is None:
+        return None
+    t = pd.Timestamp(ts)
+    return t.tz_convert("UTC") if t.tzinfo else t.tz_localize("UTC")
+
+
 @dataclass
 class WriteResult:
     source_id: str
@@ -92,6 +99,52 @@ class SwxStore:
             d = self.parquet_root / code
             if d.is_dir() and any(d.rglob("*.parquet")):
                 out.append(str(d / "*" / "*.parquet").replace("\\", "/"))
+        return out
+
+    @staticmethod
+    def _partition_span(name: str) -> tuple[pd.Timestamp, pd.Timestamp] | None:
+        """分區目錄名 → 涵蓋的 [起, 迄)。無法辨識的名稱回傳 None（一律保留，不裁剪）。"""
+        try:
+            if len(name) == 4 and name.isdigit():
+                lo = pd.Timestamp(f"{name}-01-01", tz="UTC")
+                return lo, lo + pd.DateOffset(years=1)
+            if len(name) == 7 and name[4] == "-":
+                lo = pd.Timestamp(f"{name}-01", tz="UTC")
+                return lo, lo + pd.DateOffset(months=1)
+        except ValueError:
+            return None
+        return None
+
+    def partition_globs(
+        self,
+        params: list[str] | None = None,
+        *,
+        start: datetime | None = None,
+        end: datetime | None = None,
+    ) -> list[str]:
+        """只列出與 [start, end] 重疊的分區（依 valid_time 裁剪）。
+
+        分區鍵就是 valid_time 的年或年月（見 partition_format），所以不重疊的分區
+        **不可能**含有落在查詢窗內的列——裁剪不改變結果，只少開檔。
+        未給 start/end 時等同 globs()。無法辨識的目錄名一律保留。
+        """
+        if start is None and end is None:
+            return self.globs(params)
+        lo, hi = _utc(start), _utc(end)
+        codes = params or [p.name for p in self.parquet_root.iterdir() if p.is_dir()]
+        out: list[str] = []
+        for code in codes:
+            d = self.parquet_root / code
+            if not d.is_dir():
+                continue
+            for part in sorted(p for p in d.iterdir() if p.is_dir()):
+                span = self._partition_span(part.name)
+                if span is not None:
+                    p_lo, p_hi = span
+                    if (lo is not None and p_hi <= lo) or (hi is not None and p_lo > hi):
+                        continue
+                if any(part.glob("*.parquet")):
+                    out.append(str(part / "*.parquet").replace("\\", "/"))
         return out
 
     def raw_path(self, source_id: str, ts: datetime, ext: str) -> Path:
@@ -155,6 +208,13 @@ class SwxStore:
                 out_dir = self._partition_dir(str(code), str(key))
                 out_dir.mkdir(parents=True, exist_ok=True)
                 path = out_dir / f"{sid}-{stamp}.parquet"
+                # 同來源、同 ingest_time 再寫一次（例如以相同 --ingest-time 重跑）時，
+                # 檔名會相同。append-only 不可覆寫：覆寫加上 dedupe 只寫差異列，
+                # 會讓前一批未變動的列靜默消失。加序號另存。
+                n = 1
+                while path.exists():
+                    path = out_dir / f"{sid}-{stamp}-{n}.parquet"
+                    n += 1
                 table = pa.Table.from_pandas(grp, schema=ARROW_SCHEMA, preserve_index=False)
                 pq.write_table(table, path, compression="zstd")
                 files.append(path)
@@ -253,7 +313,7 @@ class SwxStore:
         故對它們是無異動。
         """
         codes = [params] if isinstance(params, str) else params
-        globs = self.globs(codes)
+        globs = self.partition_globs(codes, start=start, end=end)
         if not globs:
             return empty_frame()
 
@@ -305,8 +365,28 @@ class SwxStore:
         return df.set_index("valid_time")["value"].astype("float64")
 
     def latest(self, param: str, *, as_of: datetime | None = None) -> pd.Series | None:
-        df = self.query(param, as_of=as_of, observed_only=True)
-        return None if df.empty else df.iloc[-1]
+        """最新一筆觀測。由新到舊逐分區找，找到即停。
+
+        分區鍵是 valid_time，所以「含有任何合格觀測的最新分區」必然含有
+        全域最新的那個 valid_time；同一 valid_time 的多來源、多版本也都在
+        同一分區內，去重結果與全掃相同。以前每次全掃整個參數的歷史。
+        """
+        d = self.parquet_root / param
+        parts = sorted((p for p in d.iterdir() if p.is_dir()), reverse=True) \
+            if d.is_dir() else []
+        # 名稱無法辨識、或年／月分區混用（cadence 設定曾變更）時，「最新分區」
+        # 無法單憑名稱排序決定（2026-08 排在 2026 之前，但 2026 可能含 10 月）——保守全掃。
+        if any(self._partition_span(p.name) is None for p in parts) or \
+                len({len(p.name) for p in parts}) > 1:
+            df = self.query(param, as_of=as_of, observed_only=True)
+            return None if df.empty else df.iloc[-1]
+        for part in parts:
+            lo, hi = self._partition_span(part.name)
+            df = self.query(param, start=lo, end=hi - pd.Timedelta(microseconds=1),
+                            as_of=as_of, observed_only=True)
+            if not df.empty:
+                return df.iloc[-1]
+        return None
 
     def available_params(self) -> list[str]:
         if not self.parquet_root.is_dir():

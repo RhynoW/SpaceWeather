@@ -214,6 +214,10 @@ class RiskEngine:
         self.store = store or SwxStore()
         self.rules = rules if rules is not None else load_rules()
         self.registry = registry()
+        #: 一輪 evaluate() 內的序列快取。多條規則共用同一參數（Kp 被 6 條規則引用），
+        #: 同一輪內的時間窗與 as_of 相同，重查只是重複讀同一批檔。只在 evaluate()
+        #: 期間存在：資料層隨時會被擷取端追加，跨輪快取會讓 nowcast 看到舊值。
+        self._memo: dict | None = None
 
     # ── 序列準備 ────────────────────────────────────────────────────────
     def _series(self, param: str, start, end, as_of, region: str | None = None) -> pd.Series:
@@ -227,10 +231,17 @@ class RiskEngine:
                            舊行為是 `duplicated(keep="last")`，等於讓 parquet
                            的列序決定判讀結果——不會報錯，只是安靜地看錯網。
         """
+        key = (param, start, end, as_of, region)
+        if self._memo is not None and key in self._memo:
+            return self._memo[key].copy()
         s = self.store.series(param, start=start, end=end, as_of=as_of, grid_id=region)
         if s.index.has_duplicates:
             s = s.groupby(level=0).max()
-        return s.sort_index()
+        s = s.sort_index()
+        if self._memo is not None:
+            self._memo[key] = s
+            return s.copy()
+        return s
 
     @staticmethod
     def _dwell_mask(cond_true: pd.Series, dwell_h: float) -> pd.Series:
@@ -421,10 +432,19 @@ class RiskEngine:
         """評估全部規則，回傳 (episodes, 規則狀態表)。"""
         episodes: list[Episode] = []
         status_rows = []
-        for rule in self.rules:
-            if domains and rule.domain not in domains:
-                continue
-            eps, status = self.evaluate_rule(rule, start=start, end=end, as_of=as_of)
+        outer = self._memo is None
+        if outer:
+            self._memo = {}
+        try:
+            results = [
+                (rule, *self.evaluate_rule(rule, start=start, end=end, as_of=as_of))
+                for rule in self.rules
+                if not (domains and rule.domain not in domains)
+            ]
+        finally:
+            if outer:
+                self._memo = None
+        for rule, eps, status in results:
             episodes.extend(eps)
             status_rows.append(
                 {
