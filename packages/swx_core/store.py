@@ -352,6 +352,70 @@ class SwxStore:
         df["degraded"] = (df["age_s"] > df["latency_budget_s"]).fillna(False)
         return df
 
+    # ── 維運：碎檔合併 ──────────────────────────────────────────────────
+    def compact(
+        self,
+        params: list[str] | None = None,
+        *,
+        min_files: int = 2,
+        dry_run: bool = False,
+    ) -> list[dict]:
+        """把同一分區的多個小檔合併成一檔。**不刪任何一列**。
+
+        為何需要：每次擷取都在分區內新增一檔（append-only 的代價），
+        查詢時 read_parquet 須逐檔開啟。檔數隨排程線性成長，而內容多半只有幾十列。
+
+        為何安全：
+          · 合併只是搬家——每一列（含 ingest_time、revision）原樣保留，
+            as_of 回放與「tier 最小、ingest 最新」的去重結果不變。
+          · 先寫 .tmp、改名，**再**刪原檔。改名到刪除之間讀者會看到重複列，
+            但重複列完全相同，被查詢的 DISTINCT ON 吸收。
+          · 只刪本次讀過的檔；合併期間擷取端新寫入的檔不受影響。
+        """
+        codes = params or [p.name for p in self.parquet_root.iterdir() if p.is_dir()]
+        report: list[dict] = []
+        for code in sorted(codes):
+            code_dir = self.parquet_root / code
+            if not code_dir.is_dir():
+                continue
+            for part in sorted(p for p in code_dir.iterdir() if p.is_dir()):
+                files = sorted(part.glob("*.parquet"))
+                if len(files) < min_files:
+                    continue
+                tables = [self._conform(pq.read_table(f)) for f in files]
+                merged = pa.concat_tables(tables).sort_by(
+                    [("valid_time", "ascending"), ("ingest_time", "ascending")]
+                )
+                rows = sum(t.num_rows for t in tables)
+                entry = {"param_code": code, "partition": part.name,
+                         "files_in": len(files), "rows": rows,
+                         "bytes_in": sum(f.stat().st_size for f in files)}
+                if not dry_run:
+                    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+                    final = part / f"compacted-{stamp}.parquet"
+                    tmp = final.with_suffix(".parquet.tmp")
+                    pq.write_table(merged, tmp, compression="zstd")
+                    if pq.read_metadata(tmp).num_rows != rows:   # 寫壞就不動原檔
+                        tmp.unlink(missing_ok=True)
+                        raise RuntimeError(f"{part} 合併後列數不符，已中止")
+                    tmp.replace(final)
+                    for f in files:
+                        f.unlink()
+                    entry["bytes_out"] = final.stat().st_size
+                report.append(entry)
+        return report
+
+    @staticmethod
+    def _conform(table: pa.Table) -> pa.Table:
+        """舊檔可能缺後來新增的欄位：補 null 後依現行 schema 排序並轉型。"""
+        cols = []
+        for field_ in ARROW_SCHEMA:
+            if field_.name in table.column_names:
+                cols.append(table.column(field_.name).cast(field_.type))
+            else:
+                cols.append(pa.nulls(table.num_rows, type=field_.type))
+        return pa.Table.from_arrays(cols, schema=ARROW_SCHEMA)
+
     # ── 稽核 ────────────────────────────────────────────────────────────
     def storage_summary(self) -> pd.DataFrame:
         rows = []

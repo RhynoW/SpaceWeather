@@ -80,7 +80,7 @@ def test_media_counts_match_config():
 
 def test_api_endpoint_count_matches_implementation():
     src = (ROOT / "services" / "api" / "app.py").read_text(encoding="utf-8")
-    assert _only(r"(\d+) 個端點") == len(re.findall(r'@app\.get\("', src))
+    assert _only(r"(\d+) 個端點") == len(re.findall(r'@app\.(?:get|post)\("', src))
 
 
 def test_dashboard_page_table_lists_every_page():

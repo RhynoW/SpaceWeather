@@ -4,15 +4,17 @@
 `Settings.from_env` + 唯讀資料存取。原案的 `/api/orbit_czml` 等軌道端點可在
 後續階段直接併入本服務，成為 SDA 圖層與太空天氣圖層疊加的基礎。
 
-API 設計原則（架構書 §10.1）：唯讀為主、無狀態、可快取；所有回應帶
+API 設計原則（架構書 §10.1）：唯讀為主、無狀態、可快取；唯一寫入端點是
+需授權的事件卡人工發布（預設關閉）。所有回應帶
 `data_age_s` 與 `degraded`，讓呼叫端能分辨「沒事」與「沒資料」。
 """
 
 from __future__ import annotations
 
+import hmac
 import os
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,11 +23,8 @@ from flask import Flask, jsonify, request
 
 from swx_core import SwxStore, catalog, data_origin, registry
 from swx_core.schema import OBSERVED_TYPES
-from swx_core.flare import flux_to_class, r_scale
 
-from services.exporter import drag_correction, stk_spaceweather
-from services.risk_engine.engine import RiskEngine
-from services.risk_engine.eventcard import EventStore, build_event_cards
+from services import products
 
 
 @dataclass(frozen=True)
@@ -143,7 +142,7 @@ def create_app(store: SwxStore | None = None) -> Flask:
 
     store = store or SwxStore()
     reg = registry()
-    events = EventStore()
+    events = products.event_store()
 
     # ── 健康與字典 ──────────────────────────────────────────────────────
     @app.get("/health")
@@ -246,35 +245,21 @@ def create_app(store: SwxStore | None = None) -> Flask:
         目標參數的**最新觀測時刻**（預報引擎即以此為起報錨點）。資料落後時
         還原值會偏大，故一併回傳 `issued_basis` 讓呼叫端知道這是還原而非記錄。
         """
-        from services.forecast.features import TARGETS
         from services.forecast.run import forecast_confidence
-        from services.forecast.skill import (latest_forecast_batch, load_skill,
-                                             skill_models)
+        from services.forecast.skill import load_skill, skill_models
 
         key = request.args.get("target", "kp")
-        if key not in TARGETS:
+        targets = products.forecast_targets()
+        if key not in targets:
             return jsonify({"error": f"未知的預報目標 {key}",
-                            "available": sorted(TARGETS)}), 404
-        spec = TARGETS[key]
+                            "available": sorted(targets)}), 404
 
-        now = _now()
-        # 視窗放寬到 30 天：資料落後時仍要看得到最後一批預報與它的錨點，
-        # 空回應會被誤讀成「沒有風險」而非「資料沒更新」。
-        # 連續型目標沒有機率參數，prob_code 為 None——直接放進查詢清單
-        # 會查一個不存在的參數碼。
-        codes = [c for c in (spec.code, spec.prob_code) if c]
-        df = store.query(codes,
-                         start=now - timedelta(days=30), end=now + timedelta(days=3),
-                         as_of=_ts(request.args.get("as_of")))
-        fcs = latest_forecast_batch(
-            df[df["source_id"] == "swx_forecast"] if not df.empty else df)
-        obs = df[df["data_type"].isin(OBSERVED_TYPES)] if not df.empty else df
-        latest_obs = obs.loc[obs["param_code"] == spec.code, "valid_time"].max() \
-            if not obs.empty else None
-        # 對齊到目標的格點：預報引擎以格點為起報錨點，而觀測的 valid_time
-        # 可能落在格間（例如 SWPC 估計 Kp 標在 00:05）。不對齊的話 horizon
-        # 會還原成 2.92 小時，技巧查表就查不到——差幾分鐘讓整個 KPI 消失。
-        issued = None if latest_obs is None else pd.Timestamp(latest_obs).floor(spec.grid)
+        # 查詢視窗（30 天，資料落後時仍看得到最後一批）、prob_code 為 None 的處理、
+        # 起報錨點對齊格點：皆在產品層，與儀表板預報頁同一份實作。
+        view = products.forecast_view(store, key, as_of=_ts(request.args.get("as_of")),
+                                      now=_now())
+        spec, fcs = view.spec, view.own
+        latest_obs, issued = view.latest_observed, view.issued
 
         prob = ({} if (spec.prob_code is None or fcs.empty) else
                 fcs[fcs["param_code"] == spec.prob_code]
@@ -332,11 +317,10 @@ def create_app(store: SwxStore | None = None) -> Flask:
     # ── 現況與事件 ──────────────────────────────────────────────────────
     @app.get("/v1/nowcast")
     def nowcast():
-        engine = RiskEngine(store)
         return jsonify(
             {
                 "issued_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "domains": _records(engine.nowcast()),
+                "domains": _records(products.nowcast(store)),
             }
         )
 
@@ -345,11 +329,11 @@ def create_app(store: SwxStore | None = None) -> Flask:
         start = _ts(request.args.get("from"))
         end = _ts(request.args.get("to"))
         if start or end:
-            engine = RiskEngine(store)
-            eps, _ = engine.evaluate(start=start, end=end, as_of=_ts(request.args.get("as_of")))
-            cards = [c.to_dict() for c in build_event_cards(eps, store=store)]
+            cards = products.event_cards(store, start=start, end=end,
+                                         as_of=_ts(request.args.get("as_of")))
         else:
-            cards = events.list_events(min_level=request.args.get("level"))
+            cards = products.stored_event_cards(min_level=request.args.get("level"),
+                                                store=events)
         return jsonify({"count": len(cards), "events": cards})
 
     @app.get("/v1/events/<event_id>")
@@ -363,55 +347,67 @@ def create_app(store: SwxStore | None = None) -> Flask:
     def event_history(event_id: str):
         return jsonify(events.history(event_id))
 
+    @app.get("/v1/events/<event_id>/notifications")
+    def event_notifications(event_id: str):
+        body = products.event_notifications(event_id, store=events)
+        if body is None:
+            return jsonify({"error": f"查無事件 {event_id}"}), 404
+        return jsonify(body)
+
+    @app.post("/v1/events/<event_id>/issue")
+    def issue_event(event_id: str):
+        """人工確認發布（draft → issued）。本 API **唯一**的寫入端點。
+
+        預設關閉（fail-closed）：未設 `SWX_API_ISSUE_TOKEN` 時一律 403，
+        對外唯讀部署不會因忘了設定而多出一個可寫入口。
+        發布者以 `X-SWX-Actor` 具名，寫入 append-only 稽核表。
+        """
+        token = os.getenv("SWX_API_ISSUE_TOKEN", "")
+        if not token:
+            return jsonify({"error": {"code": "ISSUE_DISABLED",
+                                      "message": "此部署未啟用發布功能（唯讀）"}}), 403
+        auth = request.headers.get("Authorization", "")
+        given = auth[7:] if auth.startswith("Bearer ") else ""
+        if not given or not hmac.compare_digest(given.encode(), token.encode()):
+            return jsonify({"error": {"code": "UNAUTHORIZED",
+                                      "message": "缺少或錯誤的授權權杖"}}), 401
+        actor = (request.headers.get("X-SWX-Actor") or "").strip()
+        if not actor:
+            return jsonify({"error": {"code": "ACTOR_REQUIRED",
+                                      "message": "發布必須具名（X-SWX-Actor）"}}), 400
+        card = events.latest(event_id)
+        if card is None:
+            return jsonify({"error": f"查無事件 {event_id}"}), 404
+        if not events.issue(event_id, actor=actor):
+            return jsonify({"error": {"code": "NOT_DRAFT",
+                                      "message": f"最新版狀態為 {card.get('status')}，不可發布"}}), 409
+        return jsonify(events.latest(event_id))
+
     @app.get("/v1/rules")
     def rules():
-        engine = RiskEngine(store)
-        _, status = engine.evaluate(
-            start=datetime.now(timezone.utc) - timedelta(days=2),
-            end=datetime.now(timezone.utc),
-        )
-        return jsonify(_records(status))
+        return jsonify(_records(products.rule_status(store, days=2)))
 
     # ── 太陽閃焰 ────────────────────────────────────────────────────────
     @app.get("/v1/flares")
     def flares():
-        df = store.query(
-            "FLARE_PEAK",
-            start=_ts(request.args.get("from")),
-            end=_ts(request.args.get("to")),
-        )
-        if df.empty:
-            return jsonify({"count": 0, "flares": []})
-        out = [
-            {
-                "peak_utc": row["valid_time"].strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "peak_flux_w_m2": row["value"],
-                "flare_class": flux_to_class(row["value"]),
-                "noaa_r_scale": r_scale(row["value"]),
-                "source_id": row["source_id"],
-            }
-            for _, row in df.iterrows()
-        ]
-        out.sort(key=lambda d: d["peak_utc"], reverse=True)
+        out = products.flare_list(store, start=_ts(request.args.get("from")),
+                                  end=_ts(request.args.get("to")))
         return jsonify({"count": len(out), "flares": out})
 
     # ── 匯出 ────────────────────────────────────────────────────────────
     @app.get("/v1/exports/stk/spaceweather.txt")
     def export_stk():
-        from swx_core import cssi
-
-        wide = stk_spaceweather.build_frame(
+        text = products.stk_cssi_text(
             store,
             start=_ts(request.args.get("from")),
             as_of=_ts(request.args.get("as_of")),
-            mode=request.args.get("mode", stk_spaceweather.MODE_SOURCE),
+            mode=request.args.get("mode", products.STK_MODE_SOURCE),
         )
-        text = cssi.write_text(wide, updated=datetime.now(timezone.utc))
         return app.response_class(text, mimetype="text/plain; charset=utf-8")
 
     @app.get("/v1/exports/drag-correction")
     def export_drag():
-        df = drag_correction.build(
+        df = products.drag_correction_table(
             store,
             start=_ts(request.args.get("from")),
             end=_ts(request.args.get("to")),
@@ -421,7 +417,7 @@ def create_app(store: SwxStore | None = None) -> Flask:
             {
                 # 與 services.exporter.drag_correction.export() 的 metadata 同義，
                 # 兩處若飄開，使用者會拿到互相矛盾的基準定義。
-                **drag_correction.product_metadata(),
+                **products.drag_correction_metadata(),
                 "count": len(df),
                 "records": _records(df),
             }

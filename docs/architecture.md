@@ -685,7 +685,36 @@ SpaceWeather/
    若直接除以 10 會得到 0.3 而非 0.333，KpSum 會系統性偏低。且此還原**只適用觀測值**，
    預測段的 Kp 不在三分位格點上（實檔可見 22、24），強行套用會把 24 變成 23。
 
+## 16.2 架構檢視：設計與實作的落差（2026-11-18）
+
+> 檢視方法：逐條拿 §1 設計原則、§4 治理規則、§12 部署分區對照程式碼，
+> 只記錄**有程式位置可指認**的落差。§16 的樹狀圖是 v0.2 當時的快照，
+> 現況以 README「目錄結構」為準。
+
+### 已在本次修正
+
+| # | 落差 | 原狀 | 修正 | 守護測試 |
+|---|---|---|---|---|
+| G1 | **L3 以上人工確認沒有操作入口**（§11、§15） | `EventStore.issue()` 除測試外無任何呼叫者；API 全唯讀、儀表板無發布鈕——「人工確認」只存在於文件 | 新增 `POST /v1/events/{id}/issue`：Bearer 權杖＋`X-SWX-Actor` 具名；**未設權杖即 403**（fail-closed，唯讀部署不會因漏設而多出寫入口）；重複發布 409 | `tests/test_ops_hardening.py` |
+| G2 | **稽核表 append-only 只靠慣例**（§12） | 任何能開 SQLite 檔的程式都能 UPDATE／DELETE `audit_log` | 以 SQLite trigger 在資料庫層拒絕改寫與刪除；`issue()` 拒絕匿名發布者 | 同上 |
+| G3 | **作業狀態庫的多行程寫入**（§6.1 宣稱「需並發寫入」） | 預設 rollback journal、無 busy timeout；`with sqlite3.connect()` 只提交不關閉連線 | WAL＋`busy_timeout`，每次交易結束即關閉連線 | 既有事件生命週期測試；**多行程競態仍無測試** |
+| G4 | **append-only 的代價沒有回收機制**（P3、P9） | 每次擷取在分區內新增一檔；本機實測 1,166 檔中 686 檔可合併為 112 檔 | `SwxStore.compact()`＋`tools/compact_store.py`：合併不刪列、先寫暫存再改名、只刪讀過的檔；as_of 回放結果不變 | 同上（含回放前後逐列比對） |
+| G5 | **展示行程自行對外擷取，與 P7 內外網分離衝突**（§12） | 儀表板開站即背景擷取（雲端示範站需要，作業區不應有出向連線） | `SWX_DASHBOARD_INGEST=off` 停用儀表板擷取；預設維持 `on`，雲端行為不變 | — |
+| G6 | **儀表板繞過 API，違反 §4 治理規則**（原 R1） | 儀表板直接 import `RiskEngine`、`build_event_cards`、`stk_spaceweather`、`drag_correction`；API 另組一份參數。預報頁把可能為 None 的 `prob_code` 放進查詢清單（API 已修、儀表板未修）；事件卡頁同一段回放算兩次、其一未快取 | 新增產品層 `services/products.py`：nowcast、規則評估、事件卡、閃焰清單、預報視圖（`forecast_view`：查詢窗、錨點對齊格點）、STK／阻力匯出。API 與儀表板皆改經此層 | `tests/test_products_boundary.py`：AST 掃描禁止 `apps/`、`services/api` 直接 import `risk_engine`／`exporter`；API 與產品層輸出逐欄比對 |
+| G7 | **`notify` 欄位沒有投遞機制**（原 R2；§3「告警推播」） | 規則 YAML 與事件卡都帶 `notify`，全專案無投遞程式；§14「L3 以上 30 分鐘內發布」無從計時 | transactional outbox：`issue()` 在**同一交易**依 `configs/notify.yaml` 寫入待送訊息（角色×通道），發布與待送同生同滅；`services.notify.dispatch` 另行投遞（`file` 給單向傳輸、`webhook` 給內網閘道，URL 只從環境變數讀），指數退避重試、租約防卡死、超限標 failed，送達與失敗皆入稽核表；未定義路由的角色留下可見的 failed 而非靜默略過；訊息本身標 `is_demo`；`GET /v1/events/{id}/notifications` 回報 `issue_latency_s` 與逐筆 `delivery_s` | `tests/test_notify.py`（含：規則角色皆有路由、交易回滾、重試至放棄、租約收回） |
+
+### 尚未修正（依建議順序）
+
+| # | 落差 | 證據 | 影響 | 建議 |
+|---|---|---|---|---|
+| R1′ | **產品層之外仍有直接相依**（G6 的剩餘範圍） | 儀表板仍直接 import `services.forecast.skill`（讀技巧表）、`services.ingest.refresh`（更新狀態）、`tools.whatif_threshold`、`tools.alongtrack_drivers`；`/v1/forecast` 的逐列組裝（horizon 還原、技巧對應）仍只在 API 內 | 技巧表與工具為唯讀分析，分歧風險低於 G6 已處理者；但預報列組裝若儀表板日後也要，會再長出第二份 | 把 `/v1/forecast` 的逐列組裝移入 `products`；技巧表讀取與 what-if 包成產品函式後，把禁止清單擴到 `services.forecast`、`tools`。作業版前端改為純 API client 時，產品層即為 API 實作層。**可信度語意待定**：API 以還原的 horizon 重算 `forecast_confidence(h)`，儀表板讀寫入時記錄的值；資料落後時兩者可能不同，宜統一採記錄值 |
+| R3 | **部署產物不存在**（§12 寫 Docker Compose 三區） | 無 Dockerfile／compose；API 以 Flask 開發伺服器 `app.run()` 啟動 | 無法示範 Zone A/B/C；開發伺服器不適合作業負載 | compose 三服務對應分區：`collector`（Zone A，唯一有出向網路）、`api`＋`dashboard`（Zone B，`network_mode: internal`、`SWX_DASHBOARD_INGEST=off`）；API 改以 waitress 啟動（Windows 相容） |
+| R4 | **OpenAPI 規格未產出**（§12 技術選型寫 apispec） | 契約只由 `tests/test_api_contract.py` 的端點集合守住，無機器可讀規格 | 介接方（SDA 平臺、STK 工作站）須讀 README 開發 | 產生 `docs/openapi.json` 並由契約測試比對端點集合，與 `forecast_skill.json` 同一模式 |
+| R5 | **CORS 全開** | `CORS(app, resources={r"/v1/*": {"origins": "*"}})` | 對外唯讀示範可接受；作業區應限定來源 | 以 `SWX_API_CORS_ORIGINS` 設定，未設時不啟用 CORS |
+| R6 | **每次查詢全掃 Parquet** | `SwxStore.connect()` 為記憶體連線，每次 `read_parquet` 全部分區 | 目前 15 MB 無感；接入格網型 TEC/S4 後成本線性上升 | 先靠 G4 控制檔數；格網資料上線時再加「最新值」物化表 |
+
 ## 17. 最先要做的五件事（117 年前兩個月）
+
 
 1. **凍結資料契約 v1**：`param_registry`、`swx_observation`、事件卡 JSON Schema。三個子計畫簽字確認。
 2. **移入既有資產並跑通回歸**：`atmospheric_drag.py`＋`run_drag_residual.py`＋`space_weather_ap.csv` 在新環境重現既有輸出，作為複用成功的驗收。

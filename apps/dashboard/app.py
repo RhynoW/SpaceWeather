@@ -29,9 +29,7 @@ import plotly.graph_objects as go  # noqa: E402
 import streamlit as st  # noqa: E402
 
 import services  # noqa: E402,F401
-from services.exporter import drag_correction, stk_spaceweather  # noqa: E402
-from services.risk_engine.engine import RiskEngine, load_rules  # noqa: E402
-from services.risk_engine.eventcard import build_event_cards  # noqa: E402
+from services import products  # noqa: E402  產品層：與 API 共用同一條呼叫路徑
 from swx_core import (  # noqa: E402
     SwxStore, animations, catalog, data_origin, imagery, quality_summary, registry,
 )
@@ -119,27 +117,19 @@ def build_stamp() -> str:
 
 
 def load_nowcast() -> pd.DataFrame:
-    return RiskEngine(get_store()).nowcast()
+    return products.nowcast(get_store())
 
 
 @st.cache_data(ttl=300)
 def load_episodes(days: int):
-    end = datetime.now(timezone.utc)
-    engine = RiskEngine(get_store())
-    eps, status = engine.evaluate(start=end - timedelta(days=days), end=end)
+    eps, status = products.evaluate(get_store(), days=days)
     return pd.DataFrame([e.to_dict() for e in eps]), status
 
 
 @st.cache_data(ttl=300)
 def load_event_cards(days: int) -> list[dict]:
     """近 N 日的事件卡（dict 形式），供值勤模式與事件卡頁共用。"""
-    end = datetime.now(timezone.utc)
-    engine = RiskEngine(get_store())
-    eps, _status = engine.evaluate(start=end - timedelta(days=days), end=end)
-    if not eps:
-        return []
-    cards = build_event_cards(eps, store=get_store())
-    return [c.to_dict() for c in cards]
+    return products.event_cards(get_store(), days=days)
 
 
 def age_badge(age_s: float | None) -> str:
@@ -393,6 +383,20 @@ def animations_by_id(*ids: str) -> list[dict]:
 REFRESH_MAX_AGE_MIN = 60.0
 
 
+def dashboard_ingest_enabled() -> bool:
+    """展示行程是否可自行對外擷取（架構書 P7 內外網分離）。
+
+    雲端示範站沒有常駐排程，只能由儀表板順手更新（預設開）。
+    作業部署則相反：儀表板在 Zone B 作業區，**不應有任何出向連線**，
+    擷取交給 Zone A 的排程，經單向傳輸送進來。設 `SWX_DASHBOARD_INGEST=off`
+    後，自動更新與手動更新按鈕一併停用。
+    """
+    import os
+
+    return os.getenv("SWX_DASHBOARD_INGEST", "on").strip().lower() not in {
+        "off", "0", "false", "no"}
+
+
 @st.cache_resource
 def _refresh_state() -> dict:
     """跨 session 共用的更新狀態（cache_resource 在整個 app 只有一份）。"""
@@ -524,6 +528,9 @@ def refresh_status_line() -> None:
         elif result is not None and result.ran:
             st.sidebar.caption(f"上次更新：{result.summary()}")
 
+    if not dashboard_ingest_enabled():
+        st.sidebar.caption("本部署由排程擷取，儀表板不對外連線（SWX_DASHBOARD_INGEST=off）")
+        return
     c1, c2 = st.sidebar.columns(2)
     if c1.button("更新", disabled=running, width='stretch',
                  help=f"重新擷取 {len(live_sources())} 個近即時來源（約 30–50 秒，背景執行）"):
@@ -538,7 +545,7 @@ def refresh_status_line() -> None:
 def autostart_refresh() -> None:
     """開站時檢查一次：資料齡期超過門檻就在背景更新。"""
     state = _refresh_state()
-    if state.get("checked"):
+    if state.get("checked") or not dashboard_ingest_enabled():
         return
     state["checked"] = True
     try:
@@ -958,12 +965,7 @@ elif page == "事件卡":
     if episodes.empty:
         st.success(f"近 {lookback} 天無規則命中（L0）。")
     else:
-        engine = RiskEngine(get_store())
-        end = datetime.now(timezone.utc)
-        eps, _ = engine.evaluate(start=end - timedelta(days=lookback), end=end)
-        cards = build_event_cards(eps, store=get_store())
-        for card in cards:
-            d = card.to_dict()
+        for d in load_event_cards(lookback):
             color = LEVEL_COLOR.get(d["mission_level"], "#616161")
             with st.container(border=True):
                 c1, c2, c3 = st.columns([2, 1, 1])
@@ -1079,9 +1081,9 @@ elif page == "太陽閃焰":
 
 # ── 5. 短時預報 ────────────────────────────────────────────────────────
 elif page == "短時預報":
-    from services.forecast.features import TARGETS
-    from services.forecast.skill import (horizon_entry, latest_forecast_batch,
-                                         load_skill, skill_models)
+    from services.forecast.skill import horizon_entry, load_skill, skill_models
+
+    TARGETS = products.forecast_targets()
 
     st.title("短時預報")
     st.caption("構想書議題三：未來 1、3、6 小時短時有效預報（本引擎另延伸至 48 小時）")
@@ -1102,20 +1104,11 @@ elif page == "短時預報":
         "且訓練折 POD ≈ 0.83、測試折僅 0.02–0.38，過擬合落差存在於**所有 horizon**。"
     )
 
-    store = get_store()
     end_t = datetime.now(timezone.utc)
-    fcs = store.query([spec.code, spec.prob_code],
-                      start=end_t - timedelta(days=30), end=end_t + timedelta(days=3))
-    own = latest_forecast_batch(
-        fcs[fcs["source_id"] == "swx_forecast"] if not fcs.empty else fcs)
-    swpc = fcs[fcs["source_id"] == "swpc_geomag_forecast"] if not fcs.empty else fcs
-    obs = fcs[(fcs["param_code"] == spec.code)
-              & fcs["data_type"].isin(["OBS", "INT"])] if not fcs.empty else fcs
-
-    # 起報錨點對齊格點：觀測的 valid_time 可能落在格間（SWPC 估計 Kp 標在 00:05），
-    # 不對齊會讓 horizon 還原成 2.92 小時，技巧查表就查不到。
-    issued = (pd.Timestamp(obs["valid_time"].max()).floor(spec.grid)
-              if not obs.empty else None)
+    # 與 API /v1/forecast 同一份實作：查詢視窗、prob_code 為 None 的處理、
+    # 起報錨點對齊格點皆在產品層（services.products.forecast_view）
+    view = products.forecast_view(get_store(), target, now=end_t)
+    own, swpc, obs, issued = view.own, view.reference, view.observed, view.issued
 
     st.subheader("這個 horizon 的實測技巧")
     st.caption(
@@ -1621,7 +1614,7 @@ elif page == "軌道與密度修正":
 
     with st.spinner("計算 MSIS 2.1 密度…"):
         try:
-            dc = drag_correction.build(get_store(), start=start, end=end)
+            dc = products.drag_correction_table(get_store(), start=start, end=end)
         except Exception as exc:  # noqa: BLE001
             st.error(f"無法計算：{exc}")
             dc = pd.DataFrame()
@@ -1696,11 +1689,9 @@ elif page == "軌道與密度修正":
     st.subheader("STK / GMAT 驅動檔")
     if st.button("產生 CSSI 太空天氣檔"):
         with st.spinner("產生中…"):
-            wide = stk_spaceweather.build_frame(get_store())
-            info = stk_spaceweather.summary(wide)
-            from swx_core import cssi
-
-            text = cssi.write_text(wide)
+            wide = products.stk_cssi_frame(get_store())
+            info = products.stk_cssi_summary(wide)
+            text = products.stk_cssi_text(get_store(), frame=wide)
         st.success(f"{info['date_min']} → {info['date_max']}，{info['rows']} 天，"
                    f"區段 {info['sections']}")
         st.download_button("下載 SpaceWeather-All-v1.2.txt", text,
@@ -1895,7 +1886,7 @@ elif page == "門檻校準":
         "本頁的用途，是在校準會議上當場回答：**這組門檻，過去幾年會發出幾次告警？**"
     )
 
-    rules = load_rules()
+    rules = products.rules()
     rule_map = {f"{r.rule_id} — {r.name}（{r.domain}/{r.level}）": r for r in rules}
     picked = st.selectbox("規則", list(rule_map))
     rule = rule_map[picked]
@@ -1919,7 +1910,7 @@ elif page == "門檻校準":
             start, end = series.index.min(), series.index.max()
             with st.spinner("回放中…"):
                 table = sweep_rule(
-                    RiskEngine(store), rule,
+                    products.risk_engine(store), rule,
                     list(np.linspace(lo, hi, steps).round(2)),
                     start=start, end=end, param=param,
                 )

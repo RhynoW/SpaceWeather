@@ -32,7 +32,7 @@ LOCAL = {"swx_core", "services", "geomag", "orbit_drag", "apps", "tools",
          "stem", "media_url", "__future__"}
 STDLIB = {
     "abc", "argparse", "ast", "base64", "collections", "contextlib", "copy", "csv",
-    "dataclasses", "datetime", "enum", "functools", "glob", "hashlib", "importlib",
+    "dataclasses", "datetime", "enum", "functools", "glob", "hashlib", "hmac", "importlib",
     "io", "itertools", "json", "logging", "math", "operator", "os", "pathlib",
     "random", "re", "shutil", "socket", "sqlite3", "ssl", "struct", "subprocess",
     "sys", "tarfile", "tempfile", "textwrap", "threading", "time", "typing",

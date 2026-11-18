@@ -1,0 +1,42 @@
+# 事件卡通報路由（架構書 §11 告警推播、§16.2 G7）
+#
+# 規則 YAML 的 `notify` 寫的是**角色**（通信單位、SDA 操作席…），不是位址。
+# 本檔把角色對應到投遞通道。規則裡出現、本檔卻沒定義的角色，
+# tests/test_notify.py 會紅燈——否則該角色的通報會在執行期才被發現送不出去。
+#
+# 投遞時機：**只有人工確認發布（issued）的事件卡才會通報**。
+# draft 是系統自動判定、尚未經值勤員確認，不對外發送（架構書 §15 過度告警對策）。
+#
+# 通道型別：
+#   file     寫一個 JSON 檔到 dir（相對 SWX_DATA_DIR）。給單向傳輸（data diode）
+#            搬運、或尚未接上通報系統時的落地留存。不需網路，預設可用。
+#   webhook  HTTP POST JSON 到內網通報閘道。**URL 只從環境變數讀（url_env）**，
+#            不寫進版控；環境變數未設時，該通道的訊息標為 failed 並寫明原因，
+#            不會靜默略過。
+#
+# 角色對應的通道與位址須與需求單位確認（附錄 B）。以下為原型預設：
+# 全部角色先落地為檔案，值班主管與指揮鏈另走 webhook。
+
+defaults:
+  max_attempts: 5          # 超過即標 failed，留待人工處理
+  backoff_s: 60            # 第 n 次失敗後等 backoff_s × 2^(n-1) 秒再試
+  timeout_s: 10
+
+channels:
+  outbox_file:
+    type: file
+    dir: exports/notifications
+  duty_webhook:
+    type: webhook
+    url_env: SWX_NOTIFY_DUTY_WEBHOOK
+
+recipients:
+  通信單位:      [outbox_file]
+  衛星地面站:    [outbox_file]
+  SDA 操作席:    [outbox_file]
+  衛星操作單位:  [outbox_file]
+  測量作業單位:  [outbox_file]
+  任務規劃席:    [outbox_file]
+  太空發展科:    [outbox_file]
+  值班主管:      [outbox_file, duty_webhook]
+  指揮鏈:        [outbox_file, duty_webhook]

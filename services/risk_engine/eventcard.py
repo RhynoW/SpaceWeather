@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,7 +25,7 @@ from typing import Any
 
 import pandas as pd
 
-from swx_core import SwxStore, data_dir, registry
+from swx_core import SwxStore, data_dir, data_origin, registry
 from swx_core.flare import flux_to_class, r_scale
 
 from .engine import Episode, level_rank, max_level
@@ -34,6 +35,12 @@ SCHEMA_VERSION = "1.0"
 STATUS_DRAFT = "draft"
 STATUS_ISSUED = "issued"
 STATUS_SUPERSEDED = "superseded"
+
+NOTICE_SCHEMA = "swx.notification/1"
+NOTIFY_PENDING = "pending"
+NOTIFY_SENDING = "sending"
+NOTIFY_SENT = "sent"
+NOTIFY_FAILED = "failed"
 
 # 事件型態（依主導參數推定）
 EVENT_TYPES = {
@@ -77,6 +84,33 @@ CREATE TABLE IF NOT EXISTS audit_log (
     subject    TEXT,
     detail     TEXT
 );
+
+-- 通報 outbox（services.notify）：發布時同交易寫入，投遞程序另外送出
+CREATE TABLE IF NOT EXISTS notification_outbox (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id         TEXT NOT NULL,
+    revision         INTEGER NOT NULL,
+    recipient        TEXT NOT NULL,
+    channel          TEXT NOT NULL,
+    payload          TEXT NOT NULL,
+    status           TEXT NOT NULL,      -- pending / sending / sent / failed
+    attempts         INTEGER NOT NULL DEFAULT 0,
+    created_utc      TEXT NOT NULL,      -- = 發布時刻
+    next_attempt_utc TEXT NOT NULL,
+    sent_utc         TEXT,
+    last_error       TEXT,
+    UNIQUE (event_id, revision, recipient, channel)
+);
+CREATE INDEX IF NOT EXISTS idx_outbox_due ON notification_outbox(status, next_attempt_utc);
+
+-- append-only 由資料庫強制，而非只靠程式慣例：稽核表若能被 UPDATE／DELETE，
+-- 它證明不了任何事。任何改寫或刪除都會被 SQLite 直接拒絕。
+CREATE TRIGGER IF NOT EXISTS audit_log_no_update
+BEFORE UPDATE ON audit_log
+BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS audit_log_no_delete
+BEFORE DELETE ON audit_log
+BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END;
 """
 
 
@@ -313,10 +347,26 @@ class EventStore:
         with self._conn() as con:
             con.executescript(DDL)
 
-    def _conn(self) -> sqlite3.Connection:
-        con = sqlite3.connect(self.path)
+    @contextmanager
+    def _conn(self):
+        """一次交易：成功提交、例外回滾，**結束時關閉連線**。
+
+        sqlite3.Connection 本身的 context manager 只提交不關閉，連線會留到 GC。
+        儀表板、API 與排程是三個行程同時開這個檔：WAL 讓讀者不擋寫者，
+        busy_timeout 讓兩個寫者互相等待而不是立刻丟 `database is locked`。
+        """
+        con = sqlite3.connect(self.path, timeout=10)
         con.row_factory = sqlite3.Row
-        return con
+        try:
+            con.execute("PRAGMA journal_mode=WAL")
+            con.execute("PRAGMA busy_timeout=10000")
+            yield con
+            con.commit()
+        except BaseException:
+            con.rollback()
+            raise
+        finally:
+            con.close()
 
     def upsert(self, card: EventCard, *, actor: str = "system") -> EventCard:
         """寫入事件卡。同一 event_id 內容有變時建立新 revision 並標記前版 superseded。"""
@@ -358,17 +408,185 @@ class EventStore:
                         f"revision={card.revision} level={card.mission_level}")
         return card
 
-    def issue(self, event_id: str, *, actor: str) -> bool:
-        """人工確認後發布（L3 以上必經此步，架構書 §11）。"""
+    def issue(self, event_id: str, *, actor: str, routing=None) -> bool:
+        """人工確認後發布（L3 以上必經此步，架構書 §11）。
+
+        只會發布**最新一版且仍為 draft** 者；單一 UPDATE 在 SQLite 內是原子的，
+        兩位值勤員同時按發布，只有一人成功，另一人得到 False。
+
+        發布成功時，**同一交易**依通報路由寫入待送訊息（transactional outbox，
+        見 services.notify）。`routing` 預設讀 configs/notify.yaml。
+        """
+        if not actor or not str(actor).strip():
+            raise ValueError("發布必須具名（actor 不可為空），否則稽核紀錄無從追溯")
+        if routing is None:
+            from services.notify.routing import load_routing
+
+            routing = load_routing()
         with self._conn() as con:
             cur = con.execute(
                 "UPDATE event_card SET status=? WHERE event_id=? AND status=?"
                 " AND revision=(SELECT max(revision) FROM event_card WHERE event_id=?)",
                 (STATUS_ISSUED, event_id, STATUS_DRAFT, event_id),
             )
-            if cur.rowcount:
-                self._audit(con, actor, "issue_event_card", event_id, None)
-            return bool(cur.rowcount)
+            if not cur.rowcount:
+                return False
+            now = datetime.now(timezone.utc).isoformat()
+            self._audit(con, actor, "issue_event_card", event_id, None)
+            row = con.execute(
+                "SELECT revision, payload FROM event_card WHERE event_id=?"
+                " ORDER BY revision DESC LIMIT 1", (event_id,),
+            ).fetchone()
+            card = json.loads(row["payload"])
+            card["status"] = STATUS_ISSUED
+            self._enqueue(con, card, revision=row["revision"], actor=actor,
+                          issued_at=now, routing=routing)
+            return True
+
+    # ── 通報 outbox ─────────────────────────────────────────────────────
+    @staticmethod
+    def _notice(card: dict, *, recipient: str, actor: str, issued_at: str,
+                origin: dict) -> dict:
+        """送給收件單位的訊息本體：判讀所需的最小集合，不是整張事件卡。"""
+        t = card.get("timeline") or {}
+        return {
+            "schema": NOTICE_SCHEMA,
+            "recipient": recipient,
+            "event_id": card.get("event_id"),
+            "revision": card.get("revision"),
+            "type": card.get("type"),
+            "mission_level": card.get("mission_level"),
+            "international_scale": card.get("international_scale"),
+            "onset_utc": t.get("onset_utc"),
+            "expected_end_utc": t.get("expected_end_utc"),
+            "affected_region": card.get("affected_region"),
+            "impacts": [{"domain": i.get("domain"), "level": i.get("level"),
+                         "statement": i.get("statement"), "inference": i.get("inference")}
+                        for i in card.get("impacts") or []],
+            "recommendations": card.get("recommendations") or [],
+            "issued_by": actor,
+            "issued_at_utc": issued_at,
+            "detail_ref": f"/v1/events/{card.get('event_id')}",
+            # 收件端不會看到儀表板的紅色橫幅。示範資料觸發的通報必須在訊息本身標明，
+            # 否則一次演練就可能被當成真實事件處置。
+            "data_origin": origin.get("data_origin"),
+            "is_demo": bool(origin.get("is_demo")),
+            "operational": bool(origin.get("operational")),
+        }
+
+    def _enqueue(self, con: sqlite3.Connection, card: dict, *, revision: int,
+                 actor: str, issued_at: str, routing) -> int:
+        from services.notify.routing import UNROUTED
+
+        origin = data_origin()
+        n = 0
+        for recipient in card.get("notify") or []:
+            for channel in routing.channels_for(recipient):
+                body = self._notice(card, recipient=recipient, actor=actor,
+                                    issued_at=issued_at, origin=origin)
+                unrouted = channel == UNROUTED
+                con.execute(
+                    "INSERT OR IGNORE INTO notification_outbox (event_id, revision,"
+                    " recipient, channel, payload, status, attempts, created_utc,"
+                    " next_attempt_utc, last_error) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (card["event_id"], revision, recipient, channel,
+                     json.dumps(body, ensure_ascii=False),
+                     NOTIFY_FAILED if unrouted else NOTIFY_PENDING, 0, issued_at, issued_at,
+                     f"角色「{recipient}」未在 configs/notify.yaml 定義通道" if unrouted
+                     else None),
+                )
+                n += 1
+        self._audit(con, actor, "enqueue_notifications", card["event_id"],
+                    f"revision={revision} messages={n}")
+        return n
+
+    def claim_due(self, *, now: datetime | None = None, limit: int = 50,
+                  lease_s: float = 300.0) -> list[dict]:
+        """取出到期的待送訊息並標為 sending。
+
+        逐筆條件式更新，多個投遞程序不會搶到同一筆。標 sending 時同時給一個
+        租約（next_attempt_utc = now + lease_s）：投遞程序若在送出途中當掉，
+        租約到期後該筆會再被取出，不會永遠卡在 sending。代價是極少數情況下
+        重送一次——通報寧可重複，不可遺漏；收件端以 (event_id, revision) 去重。
+        """
+        from datetime import timedelta
+
+        now = now or datetime.now(timezone.utc)
+        now_s = now.isoformat()
+        lease = (now + timedelta(seconds=lease_s)).isoformat()
+        out = []
+        with self._conn() as con:
+            rows = con.execute(
+                "SELECT * FROM notification_outbox WHERE status IN (?,?)"
+                " AND next_attempt_utc<=? ORDER BY id LIMIT ?",
+                (NOTIFY_PENDING, NOTIFY_SENDING, now_s, limit),
+            ).fetchall()
+            for r in rows:
+                cur = con.execute(
+                    "UPDATE notification_outbox SET status=?, next_attempt_utc=?"
+                    " WHERE id=? AND status=? AND next_attempt_utc=?",
+                    (NOTIFY_SENDING, lease, r["id"], r["status"], r["next_attempt_utc"]),
+                )
+                if cur.rowcount:
+                    out.append(dict(r))
+        return out
+
+    def mark_sent(self, msg_id: int, *, detail: str | None = None) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._conn() as con:
+            r = con.execute("SELECT event_id, recipient, channel, attempts"
+                            " FROM notification_outbox WHERE id=?", (msg_id,)).fetchone()
+            con.execute(
+                "UPDATE notification_outbox SET status=?, sent_utc=?, attempts=attempts+1,"
+                " last_error=NULL WHERE id=?", (NOTIFY_SENT, now, msg_id),
+            )
+            self._audit(con, "notifier", "notification_sent", r["event_id"],
+                        f"id={msg_id} {r['recipient']}→{r['channel']}"
+                        + (f" {detail}" if detail else ""))
+
+    def mark_failed(self, msg_id: int, error: str, *, max_attempts: int,
+                    backoff_s: float) -> str:
+        """記錄一次失敗；未達上限則排定下次重試，否則標 failed。回傳新狀態。"""
+        from datetime import timedelta
+
+        with self._conn() as con:
+            r = con.execute("SELECT event_id, recipient, channel, attempts"
+                            " FROM notification_outbox WHERE id=?", (msg_id,)).fetchone()
+            attempts = int(r["attempts"]) + 1
+            final = attempts >= max_attempts
+            status = NOTIFY_FAILED if final else NOTIFY_PENDING
+            nxt = datetime.now(timezone.utc) + timedelta(
+                seconds=backoff_s * (2 ** (attempts - 1)))
+            con.execute(
+                "UPDATE notification_outbox SET status=?, attempts=?, last_error=?,"
+                " next_attempt_utc=? WHERE id=?",
+                (status, attempts, error[:500], nxt.isoformat(), msg_id),
+            )
+            self._audit(con, "notifier",
+                        "notification_failed" if final else "notification_retry",
+                        r["event_id"],
+                        f"id={msg_id} {r['recipient']}→{r['channel']} "
+                        f"attempt={attempts}: {error[:200]}")
+            return status
+
+    def notifications(self, event_id: str | None = None, *, limit: int = 500) -> list[dict]:
+        sql = "SELECT * FROM notification_outbox"
+        args: tuple = ()
+        if event_id:
+            sql += " WHERE event_id=?"
+            args = (event_id,)
+        sql += " ORDER BY id DESC LIMIT ?"
+        with self._conn() as con:
+            rows = con.execute(sql, (*args, limit)).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d.pop("payload", None)
+            if d.get("sent_utc"):
+                d["delivery_s"] = round((pd.Timestamp(d["sent_utc"])
+                                         - pd.Timestamp(d["created_utc"])).total_seconds(), 1)
+            out.append(d)
+        return out
 
     @staticmethod
     def _card_from_row(row) -> dict:

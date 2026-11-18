@@ -223,6 +223,7 @@ configs/               設定即契約
   params.yaml            參數字典（UI 標籤、API 說明、品質值域皆由此生成）
   sources.yaml           資料源盤點（議題一交付物的機器可讀版）
   rules/*.yaml           L0–L4 分級門檻
+  notify.yaml            通報路由：規則的 notify 角色 → 投遞通道（file／webhook）
 packages/
   swx_core/              資料契約、參數字典、品質管線、雙時間軸資料層、
                          CSSI 格式、閃焰分級、參數判讀指引（interpret.py）
@@ -234,7 +235,10 @@ services/
   ingest/                各來源介接器（設定驅動）
   forecast/              預報引擎與驗證擂台（Kp 3–48 h／Hp30 1–6 h／F10.7 與 Ap 1–45 天）
   risk_engine/           分級規則引擎與事件卡
+  notify/                事件卡通報：路由（configs/notify.yaml）與投遞程序（outbox 模式）
   exporter/              STK CSSI 檔、密度修正因子
+  products.py            產品層：API 與儀表板共用的唯一產品入口（nowcast、事件卡、
+                         預報視圖、匯出）；兩者不得繞過它直接 import 規則引擎與匯出器
   api/                   Flask REST API
 apps/dashboard/
   app.py                 Streamlit 儀表板
@@ -242,6 +246,7 @@ apps/dashboard/
 tools/
   e2e_demo.py            端到端鏈路演練
   whatif_threshold.py    門檻校準模擬
+  compact_store.py       Parquet 分區碎檔合併（不刪列，回放結果不變）
   cssi_compare.py        CSSI 匯出與來源實檔的逐行比對（可稽核）
   density_cross_check.py MSIS 2.1 vs NRLMSISE-00 同條件交叉比對
   make_lock.py           產生 requirements.lock
@@ -771,6 +776,14 @@ python -m services.exporter.stk_spaceweather --out out/SpaceWeather-All-v1.2.txt
 python -m services.exporter.stk_spaceweather --as-of 2024-05-10T12:00Z   # 回放
 python -m services.exporter.drag_correction --start 2024-05-08 --end 2024-05-14
 
+# 事件卡通報投遞（只送人工發布的事件卡；路由見 configs/notify.yaml）
+python -m services.notify.dispatch            # 送出到期訊息一輪（給排程）
+python -m services.notify.dispatch --loop 30  # 常駐
+python -m services.notify.dispatch --status   # 待送與失敗清單
+
+# 維運：合併 Parquet 碎檔（不刪列）
+python tools/compact_store.py --dry-run
+
 # 回放演練
 python tools/e2e_demo.py --start 2022-02-01 --end 2022-02-10   # Starlink 再入
 python tools/e2e_demo.py --as-of 2024-05-10T12:00Z             # 無前視偏差回放
@@ -792,7 +805,7 @@ python tools/media_smoke.py --all            # 設定檔內全部 22 項
 
 ## API
 
-14 個端點，唯讀為主、無狀態、可快取。
+16 個端點：15 個唯讀（無狀態、可快取）＋1 個需授權的事件卡人工發布（預設關閉）。
 端點集合由 `tests/test_api_contract.py` 守住——新增端點而未同步本節，測試會紅燈。
 
 **回應語意**（以下為目前實際行為，非規劃）：
@@ -910,6 +923,8 @@ S4 有了、ROTI 仍無來源，故為 `partial`——規則會在 S4 超標時�
 | `GET /v1/events?from=&to=` | 事件卡清單 |
 | `GET /v1/events/{id}` | 單一事件卡（SDA 介接格式） |
 | `GET /v1/events/{id}/history` | 事件卡修訂歷程 |
+| `GET /v1/events/{id}/notifications` | 該事件的通報送達狀態：逐筆（角色×通道）的 `status`／`attempts`／`last_error`／`delivery_s`，以及 `issue_latency_s`（事件起始 → 人工發布，對應驗收指標「L3 以上 ≤30 分鐘」） |
+| `POST /v1/events/{id}/issue` | **人工確認發布**（draft → issued）。須 `Authorization: Bearer <SWX_API_ISSUE_TOKEN>` 與 `X-SWX-Actor: <發布者>`；未設權杖時回 403（唯讀部署）。401 權杖錯誤／400 未具名／404 查無事件／409 最新版非 draft。發布者寫入 append-only 稽核表 |
 | `GET /v1/rules` | 規則狀態（含 `unavailable` 者） |
 | `GET /v1/flares` | 太陽閃焰事件（含分級與 NOAA R 級） |
 | `GET /v1/exports/stk/spaceweather.txt` | STK/GMAT CSSI 驅動檔 |
@@ -927,6 +942,9 @@ S4 有了、ROTI 仍無來源，故為 `partial`——規則會在 S4 超標時�
 | `SWX_ORBIT_DB` | 未設 | 既有 `space_db.duckdb` 路徑（掛載 TLE 全庫用） |
 | `SWX_API_HOST` / `SWX_API_PORT` | `127.0.0.1` / `5100` | API 服務位址 |
 | `SWX_API_DEBUG` | `false` | Flask debug 模式 |
+| `SWX_API_ISSUE_TOKEN` | 未設 | 啟用事件卡人工發布端點的權杖；未設即為唯讀部署 |
+| `SWX_NOTIFY_DUTY_WEBHOOK` | 未設 | 值班主管／指揮鏈的內網通報閘道 URL（`configs/notify.yaml` 的 `url_env`）；未設時該通道訊息重試後標 failed，不靜默略過 |
+| `SWX_DASHBOARD_INGEST` | `on` | `off` 時儀表板不自行對外擷取（作業區部署用，擷取交給排程；架構書 P7） |
 
 ---
 

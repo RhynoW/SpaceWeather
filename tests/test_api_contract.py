@@ -30,6 +30,8 @@ DOCUMENTED_ENDPOINTS = {
     ("GET", "/v1/events"),
     ("GET", "/v1/events/<event_id>"),
     ("GET", "/v1/events/<event_id>/history"),
+    ("GET", "/v1/events/<event_id>/notifications"),
+    ("POST", "/v1/events/<event_id>/issue"),
     ("GET", "/v1/rules"),
     ("GET", "/v1/flares"),
     ("GET", "/v1/exports/stk/spaceweather.txt"),
