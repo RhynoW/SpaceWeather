@@ -27,6 +27,7 @@ PAGES = [
     "太陽閃焰", "短時預報", "RTK 現場查核", "地磁基準場", "軌道與密度修正",
     "資料健康", "門檻校準", "名詞與判讀", "使用指南", "STEM 教學",
 ]
+PAGE_SLUG = {"名詞與判讀": "glossary", "使用指南": "guide", "資料健康": "health"}
 
 
 @pytest.mark.parametrize("page", PAGES)
@@ -86,6 +87,45 @@ def test_sidebar_offers_every_documented_page():
     app = AppTest.from_file(APP_PATH, default_timeout=120)
     app.run()
     assert list(app.sidebar.radio[0].options) == PAGES
+
+
+def test_sidebar_switches_page_on_every_single_click():
+    """側欄每點一次就要切換一次。
+
+    曾發生：radio 的 `index` 每輪由網址 `?page=` 重算。Streamlit 以參數（含 index）
+    辨識元件，網址一變 index 就變、元件被當成新的，該次點選被丟棄——
+    使用者得點兩次才切得過去，而且是每隔一次點選失效一次。
+    """
+    app = AppTest.from_file(APP_PATH, default_timeout=120)
+    app.run()
+    for target in ("名詞與判讀", "使用指南", "資料健康", "名詞與判讀"):
+        app.sidebar.radio[0].set_value(target).run()
+        assert not app.exception
+        assert app.sidebar.radio[0].value == target, f"點一次「{target}」沒有切過去"
+        assert app.title[0].value.startswith(target[:2]), \
+            f"點「{target}」後主畫面標題是 {app.title[0].value!r}"
+        assert app.query_params["page"] == [PAGE_SLUG[target]]
+
+
+def test_stem_language_switches_on_every_single_selection():
+    """STEM 語言選單與側欄同一類問題：每選一次就要切換一次。"""
+    app = AppTest.from_file(APP_PATH, default_timeout=180)
+    app.query_params["page"] = "stem"
+    app.run()
+    box = app.selectbox[0]
+    options = list(box.options)
+    for label in (options[1], options[2], options[3], options[1]):
+        app.selectbox[0].set_value(label).run()
+        assert not app.exception
+        assert app.selectbox[0].value == label, f"選一次「{label}」沒有切過去"
+    assert app.query_params["lang"] != []
+
+
+def test_url_page_param_selects_initial_page():
+    app = AppTest.from_file(APP_PATH, default_timeout=120)
+    app.query_params["page"] = "guide"
+    app.run()
+    assert app.sidebar.radio[0].value == "使用指南"
 
 
 def _stem_still_ids() -> list[str]:

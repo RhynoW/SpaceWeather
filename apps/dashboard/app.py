@@ -656,7 +656,13 @@ _default = SLUG_TO_PAGE.get(_want) or (
     st.query_params.get("page") if st.query_params.get("page") in PAGES else None
 ) or PAGES[0]
 
-page = st.sidebar.radio("頁面", PAGES, index=PAGES.index(_default))
+# **網址只在開站時讀一次**，之後以元件狀態為準。不可每輪把網址換算成 `index`：
+# Streamlit 以參數（含 index）辨識元件，網址一變 index 就變，元件被當成新的、
+# 使用者該次點選被丟棄——曾造成「側欄要點兩次才切得過去」。
+# 以固定 key 辨識元件、只在 session 尚無值時用網址初始化，即無此問題。
+if "nav_page" not in st.session_state:
+    st.session_state["nav_page"] = _default
+page = st.sidebar.radio("頁面", PAGES, key="nav_page")
 
 # 只在不一致時寫回，否則會與 Streamlit 的 rerun 形成迴圈
 if PAGE_SLUGS[page] != _want:

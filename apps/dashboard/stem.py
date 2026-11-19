@@ -790,9 +790,12 @@ def render(store, registry_fn, image_card, images_by_id,
     _want = str(st.query_params.get("lang", "")).strip().lower()
     _default = _by_code.get(_want, list(LANGS)[0])
 
+    # 網址只在初次進入時讀一次；固定 key 辨識元件（同側欄頁面選單的修正，見 app.py）。
+    # 每輪由網址換算 index 會讓元件在網址變動後被當成新的，切換語言要選兩次。
+    if "stem_lang" not in st.session_state:
+        st.session_state["stem_lang"] = _default
     lang_label = st.selectbox(
-        "🌐 Language ／ 語言 ／ 言語 ／ Bahasa", list(LANGS),
-        index=list(LANGS).index(_default),
+        "🌐 Language ／ 語言 ／ 言語 ／ Bahasa", list(LANGS), key="stem_lang",
     )
     lang = LANGS[lang_label]
     if lang != _want:
