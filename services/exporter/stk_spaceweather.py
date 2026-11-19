@@ -28,6 +28,7 @@ EXPORT_PARAMS = [
     "KP_3H", "AP_3H", "AP_AVG", "ISN", "CP", "C9", "F107_Q",
 ]
 
+SOURCE_ID = "celestrak_sw_all"   # CSSI 檔的資料本體；with_source 的預測只取此來源
 MODE_OBSERVED = "observed_only"
 MODE_SOURCE = "with_source"
 MODE_FORECAST = "with_forecast"
@@ -47,8 +48,10 @@ def build_frame(
         start=start,
         end=end,
         as_of=as_of,
-        observed_only=(mode == MODE_OBSERVED),
+        observed_only=(mode in (MODE_OBSERVED, MODE_SOURCE)),
     )
+    if mode == MODE_SOURCE:
+        obs = _with_source_predictions(store, obs, start=start, end=end, as_of=as_of)
     if obs.empty:
         raise RuntimeError(
             "資料層沒有可匯出的太空天氣參數；請先執行 "
@@ -66,6 +69,28 @@ def build_frame(
     # STK/GMAT 不使用這兩欄（GMAT 明確跳過），但保留可與 CelesTrak 原檔比對。
     wide = _fill_bartels(wide)
     return wide
+
+
+def _with_source_predictions(
+    store: SwxStore, obs: pd.DataFrame, *, start, end, as_of,
+) -> pd.DataFrame:
+    """觀測（任何來源）＋ **CelesTrak 自帶**的預測，與模式說明一致。
+
+    預測列必須在去重**之前**就限定來源。若撈全部來源再去重，同為 tier 1 的
+    SWPC 預報（Kp 3 日、F10.7 45 日）會混進預測段，而且同一列裡 Kp 來自 SWPC、
+    Ap 來自 CelesTrak，彼此對不上（實測 10-30：Kp 2.33 配 Ap 5）。STK 讀到的
+    是一列自相矛盾的驅動值，且不會報錯。
+    """
+    pred = store.query(
+        EXPORT_PARAMS, start=start, end=end, as_of=as_of, source_id=SOURCE_ID,
+    )
+    pred = pred[~pred["data_type"].isin(["OBS", "INT"])]
+    if not obs.empty and not pred.empty:
+        seen = pd.MultiIndex.from_frame(obs[["param_code", "valid_time"]])
+        key = pd.MultiIndex.from_frame(pred[["param_code", "valid_time"]])
+        pred = pred[~key.isin(seen)]
+    frames = [f for f in (obs, pred) if not f.empty]
+    return pd.concat(frames, ignore_index=True) if frames else obs
 
 
 def _fill_bartels(wide: pd.DataFrame) -> pd.DataFrame:

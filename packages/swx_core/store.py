@@ -224,9 +224,13 @@ class SwxStore:
     def _drop_unchanged(self, obs: pd.DataFrame) -> pd.DataFrame:
         """變更偵測：與既有最新值相同者不重複寫入。
 
-        比對 value、quality_flag 與 confidence 三者。三個都是交付欄位，
+        比對 value、quality_flag、confidence 與 data_type 四者。前三個是交付欄位，
         任一改變都必須落庫——只比 value 的話，品質標記或可信度的修正會被
         當成「沒變」而靜默丟棄。
+
+        data_type 也要比：預測值後來被實測**以相同數值**確認（PRD→OBS）時，
+        若只比數值，觀測列會被丟掉，庫裡永遠停在 PRD。實際發生過——CelesTrak
+        的 F10.7 L81 欄預測與實測同值，CSSI 匯出因此把 35 個觀測日放進預測區。
         """
         codes = sorted(set(obs["param_code"].dropna().astype(str)))
         globs = self.globs(codes)
@@ -238,7 +242,7 @@ class SwxStore:
         sql = f"""
             SELECT DISTINCT ON (param_code, source_id, valid_time, revision)
                    param_code, source_id, valid_time, revision, value, quality_flag,
-                   confidence
+                   confidence, data_type
             FROM read_parquet({globs!r}, union_by_name=true)
             WHERE valid_time BETWEEN ? AND ?
             ORDER BY param_code, source_id, valid_time, revision, ingest_time DESC
@@ -251,7 +255,7 @@ class SwxStore:
         existing["valid_time"] = pd.to_datetime(existing["valid_time"], utc=True)
         merged = obs.merge(
             existing.rename(columns={"value": "_old_value", "quality_flag": "_old_flag",
-                                     "confidence": "_old_conf"}),
+                                     "confidence": "_old_conf", "data_type": "_old_type"}),
             on=["param_code", "source_id", "valid_time", "revision"],
             how="left",
         )
@@ -265,7 +269,8 @@ class SwxStore:
         same_conf = (
             (merged["confidence"] - merged["_old_conf"]).abs() <= _VALUE_EPS
         ) | (merged["confidence"].isna() & merged["_old_conf"].isna())
-        unchanged = (same_value & same_flag & same_conf).fillna(False).to_numpy()
+        same_type = merged["data_type"] == merged["_old_type"]
+        unchanged = (same_value & same_flag & same_conf & same_type).fillna(False).to_numpy()
         return obs.loc[~unchanged].reset_index(drop=True)
 
     # ── 讀取 ────────────────────────────────────────────────────────────

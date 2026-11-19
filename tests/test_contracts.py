@@ -208,6 +208,23 @@ def test_write_is_append_only_and_dedupes_unchanged(temp_store):
     assert third.rows_written == 1, "只有變更的那筆該寫入"
 
 
+def test_dedupe_keeps_prediction_confirmed_by_same_valued_observation(temp_store):
+    """預測值後來被實測以「相同數值」確認：PRD→OBS 必須落庫。
+
+    只比數值的話觀測列會被當成未變更丟掉，庫裡永遠停在 PRD——CSSI 匯出
+    曾因此把 35 個觀測日（F10.7 L81 欄預測與實測同值）放進預測區。
+    """
+    pred = _obs("F107_OBS", [120.0], start="2026-08-18")
+    pred["data_type"] = "PRD"
+    temp_store.write(pred, source_id="test", ingest_time=datetime(2026, 8, 17, tzinfo=timezone.utc))
+
+    obs = pred.copy()
+    obs["data_type"] = "OBS"
+    res = temp_store.write(obs, source_id="test", ingest_time=datetime(2026, 11, 19, tzinfo=timezone.utc))
+    assert res.rows_written == 1
+    assert temp_store.query("F107_OBS").iloc[0]["data_type"] == "OBS"
+
+
 def test_multi_source_prefers_primary_tier(temp_store):
     primary = _obs("KP_3H", [3.0])
     primary["source_id"], primary["source_tier"] = "primary", 1
@@ -547,3 +564,24 @@ def test_unregistered_param_code_is_rejected_on_write(tmp_path):
     with pytest.raises(ValueError, match="未註冊"):
         store.write(bad, source_id="test")
     assert not (tmp_path / "swx_parquet" / "KP_3H_STORM_PROB").exists()
+
+
+def test_backfill_never_stamps_ingest_time_in_the_future():
+    """回填：觀測列＝valid_time＋延遲；預測列＝取得時間；任何列都不晚於取得時間。
+
+    舊行為一律 valid_time＋延遲，月預測因此帶著 2026-12 到 2041 年的入庫時間，
+    在「取最新」時永遠勝出、蓋掉之後每一份較新的預測。
+    """
+    from services.ingest.base import backfill_ingest_time
+
+    fetched = datetime(2026, 8, 17, 13, tzinfo=timezone.utc)
+    df = pd.DataFrame({
+        "valid_time": pd.to_datetime(
+            ["2026-08-01 00:00", "2026-08-17 12:00", "2026-09-01 00:00", "2030-01-01 00:00"], utc=True),
+        "data_type": ["OBS", "OBS", "PRD", "PRM"],
+    })
+    got = backfill_ingest_time(df, lag_s=86400, fetched_at=fetched)
+    assert got.iloc[0] == pd.Timestamp("2026-08-02", tz="UTC")
+    assert got.iloc[1] == pd.Timestamp(fetched), "觀測＋延遲超過取得時間 → 夾回取得時間"
+    assert (got.iloc[2:] == pd.Timestamp(fetched)).all(), "預測列記為取得時間"
+    assert (got <= pd.Timestamp(fetched)).all()

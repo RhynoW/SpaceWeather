@@ -24,6 +24,7 @@ import certifi
 import requests
 
 from swx_core import SourceSpec, SwxStore, apply_quality, empty_frame
+from swx_core.schema import OBSERVED_TYPES
 
 
 class _RelaxedStrictAdapter(requests.adapters.HTTPAdapter):
@@ -63,6 +64,23 @@ def _session_for(spec: SourceSpec) -> requests.Session:
     if bool(spec.raw.get("tls_relaxed_strict", False)):
         sess.mount("https://", _RelaxedStrictAdapter())
     return sess
+
+
+def backfill_ingest_time(df: pd.DataFrame, *, lag_s: float, fetched_at: datetime) -> pd.Series:
+    """回填模式的入庫時間：重建「當時何時可取得」。
+
+    · 觀測／內插列：`valid_time + 發布延遲`——事件發生後才可能被量到。
+    · 預測列：`valid_time + 延遲` 對預測毫無意義（預測在有效時間**之前**就已發布），
+      而且會落在未來。曾因此產生 1,253 筆入庫時間在 2026-12 到 2041 年的月預測列，
+      它們在「取最新版本」時永遠勝出，蓋掉之後每一份較新的預測，CSSI 匯出也被
+      拉進錯的區段。預測列的發布時刻無從由內容推回，只能誠實記為本次取得時間。
+    · 任何列都不得晚於取得時間——資料不可能在被取得之前就入庫。
+    """
+    fetched = pd.Timestamp(fetched_at)
+    fetched = fetched.tz_convert("UTC") if fetched.tzinfo else fetched.tz_localize("UTC")
+    observed = df["data_type"].isin(OBSERVED_TYPES)
+    stamp = (df["valid_time"] + pd.Timedelta(seconds=lag_s)).where(observed, fetched)
+    return stamp.where(stamp <= fetched, fetched)
 
 
 @dataclass
@@ -222,9 +240,10 @@ class Connector(ABC):
             outcome.rows = len(df)
 
             if backfill and not df.empty:
-                lag = pd.Timedelta(seconds=self.spec.publication_lag_s)
                 df = df.copy()
-                df["ingest_time"] = df["valid_time"] + lag
+                df["ingest_time"] = backfill_ingest_time(
+                    df, lag_s=self.spec.publication_lag_s, fetched_at=started,
+                )
                 outcome.mode += "+backfill"
                 stamp = None
             else:

@@ -644,12 +644,12 @@ SpaceWeather/
 | 模型層 | ✅ 熱氣層＋地磁基準場；◐ 電離層（D 層吸收已接）；⛔ 區域地磁擾動（待在地實測） | 2024-05 Gannon 400 km storm_ratio 2.56×（暴時 ap 模式）；IGRF-14 臺灣 F≈45,007 nT／I≈35.1°，與實測相符 |
 | 預報層 | ✅ Kp 3–48h＋**Hp30 1／3／6h**（1 小時產品建在 30 分鐘格點上） | 滾動起報回測；Kp 3–24h 勝基線 2–8%，48h 氣候平均勝出（Tier 0 門檻擋下）；Hp30 1h 為唯一 BSS 明顯為正者（0.475）；四項 KPI（命中率／誤警率／**提前量**／可信度）皆已可算 |
 | 風險層 | ✅ 3 網域 19 條規則（另 3 個已宣告網域尚無規則，於 nowcast 標為「尚無判據」） | Gannon 事件正確產生 L4（Kp 9.0、Ap 271）；駐留與遲滯行為有測試涵蓋 |
-| 產品層 | ✅ | CSSI 匯出對 CelesTrak 實檔**2,278/2,279 行一致**（唯一差異為當日仍在更新的觀測列；排除當日後 2,054/2,054 完全一致，含區段配置）；密度修正因子表 |
+| 產品層 | ✅ | CSSI 匯出：示範快照對其 CelesTrak 種子檔**2,347/2,348 行一致**（唯一差異為快照當日列；已定稿列 2,126/2,126 完全一致，含區段配置；`tests/test_cssi_snapshot.py` 每次重算）；密度修正因子表 |
 | 展示層 | ✅ API＋儀表板 | 14 個 API 端點（含 `/v1/forecast`，預報值與該 horizon 的實測技巧同列）；Streamlit 14 頁，全數以 AppTest 驗證無例外 |
 
 **已實測的關鍵數字**：
 
-- CSSI 格式讀寫可逆性：2,278/2,279 行 byte-identical（含 OBSERVED 2054、DAILY_PREDICTED 45、MONTHLY_PREDICTED 180 三段配置）。唯一不一致者為快照當日的觀測列——來源在快照後又修訂了該日 Kp，非格式缺陷；排除當日更新列後為 2,054/2,054。以 `tools/cssi_compare.py` 可複核
+- CSSI 格式讀寫可逆性：示範快照（2026-10-28）2,347/2,348 行 byte-identical（OBSERVED 2,126、DAILY_PREDICTED 44、MONTHLY_PREDICTED 178 三段配置相符）。唯一不一致者為快照當日列——該日 Kp 已有後續觀測，非格式缺陷；已定稿列 2,126/2,126。以 `tools/cssi_compare.py` 可複核，`tests/test_cssi_snapshot.py` 每次測試重算（原 08-17 快照為 2,278/2,279、2,054/2,054）
 - 2024-05-11 Gannon 峰值：Kp 9.0、Ap 271，事件卡判為 L4／G4
 - 400 km 熱氣層密度：4.6e-12 → 1.09e-11 kg/m³（storm_ratio 2.56×，暴時 ap 模式）
 - 密度修正倍率峰值：300–400 km 2.24×／400–500 km 2.90×／500–600 km 3.67×
@@ -706,6 +706,9 @@ SpaceWeather/
 | G9 | **R/S/G 只有 R 有程式實作**；無「近況＋展望」產品（參考 KSWC／SWPC 首頁） | README 稱 G/R/S 階梯「在 flare.py、由測試對照上表驗證」，實際只有 `r_scale`；G、S 僅以規則 `scale_hint` 字串存在。NOAA 3 日預報的 R／S 機率未介接 | `swx_core/scales.py` 補 `g_scale`／`s_scale`，`tests/test_scales.py` **直接解析 README 對照表**逐階比對；新增來源 `swpc_3day_forecast`（R1–R2、R3+、S1+ 機率）；`products.rsg_status`＋`GET /v1/scales`＋值勤頁表格：過去 48–24h／過去 24h／現在（只取觀測，「現在」逾齡即無資料）與 NOAA 3 日展望（逐 UTC 日） | `tests/test_scales.py`、`tests/test_rsg_satellite.py` |
 | G10 | **`SATELLITE_HEALTH` 網域已宣告但 0 條規則**，nowcast 長期「尚無判據」 | — | 新增 GOES ≥2 MeV 電子來源（`swpc_electrons`）與 10 條規則：質子 S2–S5（單粒子效應，依 NOAA S 尺度衛星影響描述）、電子以**持續時間**分級（15 分鐘／24／72 小時，深層充電為累積效應）、Kp 代理表面充電（G3–G5，上限 L3）。nowcast 回看窗自動延伸至最長駐留門檻＋6 小時（原 48 小時窗內 72 小時規則永不成立）。值勤手冊補處置對照 | 同上 |
 | G11 | **同一時刻預報值蓋掉觀測值** | 去重只依 tier 與入庫時間；SWPC Kp 預報與 CelesTrak 觀測同為 tier 1，預報較晚入庫即勝出（實測 2026-11-18 03:00 回傳預報 3.67）。規則引擎與現況橫幅因此可能把預報當成已發生，事件卡卻標 `observed` | 資料層排序加「觀測優先」鍵；規則引擎於參數有觀測時只用觀測（僅有預測值的閃焰機率照常供 pre_alert）；現況橫幅限觀測；預報視圖三種列分開查（`source_id` 於去重前過濾）。CSSI 已定稿列一致性改動前後相同 | 同上 |
+| G12 | **預測被同值實測確認時，觀測列被去重丟棄** | 寫入去重只比數值、品質標記、可信度，不比 `data_type`。CelesTrak 的 F10.7 L81 欄預測與實測常同值，PRD→OBS 被當成「未變更」，庫裡永遠停在 PRD；CSSI 依整日最不確定型別判區段，31–35 個觀測日因此落進 DAILY_PREDICTED。README 的 2,054/2,054 實測已退化為 1,947/2,054 | 去重加比 `data_type`；示範快照以修正後程式重新解析其種子檔（入庫時間沿用該批原始取得時刻 2026-10-28T10:17:38Z） | `test_dedupe_keeps_prediction_confirmed_by_same_valued_observation`；`tests/test_cssi_snapshot.py` |
+| G13 | **回填把預測列的入庫時間推到未來** | `--backfill` 一律 `valid_time＋延遲`；08-17 種子回填因此產生 1,253 筆入庫時間在 2026-12 到 2041 年的月預測列（本機庫與示範快照各一份）。它們在「取最新」時永遠勝出，蓋掉之後每份較新的預測，月初日被拉進 MONTHLY_PREDICTED | `backfill_ingest_time`：觀測列維持 `valid_time＋延遲`，預測列記為取得時間，任何列都不晚於取得時間。既有資料以 `tools/repair_backfill_ingest_time.py` 修補（只改入庫時間、不刪列不改值；以「恰為 valid_time＋延遲」為指紋，各修 2,430 列） | `test_backfill_never_stamps_ingest_time_in_the_future` |
+| G14 | **`with_source` 匯出混入 SWPC 預測** | 模式說明為「觀測＋CelesTrak 自帶預測」，實作撈全部來源再去重；同為 tier 1 的 SWPC Kp／F10.7 預報混入預測段，同一列 Kp 與 Ap 對不上（10-30：Kp 2.33 配 Ap 5），STK 讀到自相矛盾的驅動值且不報錯 | 觀測取任何來源（已定稿列驗證一致），預測在去重**前**限定 `celestrak_sw_all` | `test_with_source_takes_predictions_only_from_celestrak` |
 
 ### 尚未修正（依建議順序）
 

@@ -166,7 +166,7 @@ pip install -r requirements.lock   # 重現本文數字時使用
 
 | 模組 | 成熟度 | 已完成的驗證 | 主要限制 | 證據 |
 |---|---|---|---|---|
-| CSSI 驅動檔匯出 | 格式已驗證 | 對 CelesTrak 實檔逐行比對，排除當日更新列後 2,054/2,054 一致 | STK 實際載入未驗證 | `tests/test_contracts.py` |
+| CSSI 驅動檔匯出 | 格式已驗證 | 示範快照對其 CelesTrak 種子檔逐行比對，已定稿列 2,126/2,126 位元組一致（區段配置相符） | STK 實際載入未驗證 | `tests/test_contracts.py` |
 | 密度修正因子 | 原型 | 單元測試、前視洩漏檢查、基準污染檢查；**已與福衛七號精密定軌反演的密度交叉比對**（2024-04-29–05-20，83 個 6 小時分箱） | 比對顯示**模式的暴時響應被壓縮**（觀測增強 <1.5 時比值 0.85、≥3.5 時 1.70）；僅一個事件窗、單一高度，且兩條基線間可能有常數偏移，故**只有單調趨勢可引用**，個別絕對值不可 | `tools/density_obs_vs_model.py` |
 | 實測密度判據 `DRAG_ENHANCEMENT` | 原型 | 由 leoOrb 精密定軌反演，彈道係數在比值中消掉；合成資料驗證可抵抗短週期混疊與單顆機動 | 門檻僅以一個 21 天窗（65 個寧靜樣本）標定，寧靜期最大值 1.98 幾乎貼著 L1 門檻 2.0；本參數為**尾隨量**（標在 t 的值描述 t−6h 到 t），不適合當暴起始指標 | `tests/test_tacc_leoorb.py` |
 | D-RAP 介接 | 已介接 | 解析與臺灣取樣 | 未與在地 HF 通聯實測校準 | `services/ingest/forecast_sources.py` |
@@ -312,9 +312,12 @@ $ python tools/whatif_threshold.py --rule ORB-L3-KP6 --param KP_3H --sweep 5,6,7
 ### CSSI 格式單一實作
 
 讀進來與寫出去給 STK 的是同一組欄位定義（`swx_core/cssi.py`）。
-對 CelesTrak 實檔比對：**2,278/2,279 行一致**，唯一差異是**當日仍在更新的觀測列**
-（來源在快照後又修訂了該日 Kp）；排除當日後為 **2,054/2,054 完全一致**，
-三個區段的配置亦相符。欄位位置另對 GMAT `SolarFluxReader.cpp` 的
+示範快照（2026-10-28）對其 CelesTrak 種子檔比對：**2,347/2,348 行位元組一致**，
+唯一差異是**快照當日仍在更新的列**（該日 Kp 已有後續觀測）；日期早於快照日的
+**已定稿列 2,126/2,126 完全一致**，三個區段的配置亦相符。此數字由
+`tests/test_cssi_snapshot.py` 在每次測試時重算——它曾在無人察覺下退化到
+1,947/2,054（寫入去重不比資料型別、回填預測列入庫時間落在未來、匯出混入
+SWPC 預測；見 [docs/architecture.md](docs/architecture.md) §16.2 G12–G14）。欄位位置另對 GMAT `SolarFluxReader.cpp` 的
 `substr(92)` 交叉驗證。
 
 ### 預報技巧照實呈現
@@ -791,6 +794,7 @@ python tools/e2e_demo.py --as-of 2024-05-10T12:00Z             # 無前視偏差
 
 # CSSI 一致性比對（把 README 的格式宣稱變成可重跑的檢查）
 python tools/cssi_compare.py                 # 位元組層級，對 data/seed/SW-All.txt
+SWX_DATA_DIR=data/demo python tools/cssi_compare.py --ref data/demo/seed/SW-All.txt  # 示範快照（README 數字）
 python tools/cssi_compare.py --level field   # 診斷差異落在哪一欄
 
 # 影像連線煙霧測試（單元測試不連網，外部端點搬家時只有這支會紅燈）
@@ -956,7 +960,7 @@ S4 有了、ROTI 仍無來源，故為 `partial`——規則會在 S4 超標時�
 
 | 宣稱 | 指令 | 預期 |
 |---|---|---|
-| CSSI 格式一致性 | `python tools/cssi_compare.py` | 已定稿列 2,054/2,054 位元組一致；合計 2,278/2,279 |
+| CSSI 格式一致性 | `SWX_DATA_DIR=data/demo python tools/cssi_compare.py --ref data/demo/seed/SW-All.txt` | 已定稿列 2,126/2,126 位元組一致；合計 2,347/2,348（唯一差異為快照當日列）；`tests/test_cssi_snapshot.py` 每次測試都重跑 |
 | IGRF 臺灣參考場 | `python -c "import sys;sys.path.insert(0,'packages');from geomag import summary;print(summary())"` | F≈45,007 nT、D≈−4.62°、I≈35.13° |
 | 密度修正倍率 | `python -m services.exporter.drag_correction --start 2024-05-08 --end 2024-05-14` | 峰值 3.67×（500–600 km） |
 | 預報驗證表 | `python -m services.forecast.run --verify --splits 4` | 與 `docs/forecast_verification.md` 相同 |
