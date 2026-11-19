@@ -170,8 +170,8 @@ def test_evaluate_queries_each_series_once(tmp_path, monkeypatch):
            [2.0] * 8)
     eng = RiskEngine(s)
     calls = []
-    orig = s.series
-    monkeypatch.setattr(s, "series", lambda p, **kw: calls.append(
+    orig = s.query
+    monkeypatch.setattr(s, "query", lambda p, **kw: calls.append(
         (p, kw.get("grid_id"))) or orig(p, **kw))
     eng.evaluate(start=datetime(2026, 11, 1, tzinfo=timezone.utc),
                  end=datetime(2026, 11, 3, tzinfo=timezone.utc))

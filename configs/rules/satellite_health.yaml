@@ -1,0 +1,174 @@
+# L0–L4 分級規則：衛星平台與酬載健康網域（架構書 §9.1、§16.2 G9）
+#
+# 此網域原已在 params.yaml 宣告，但沒有任何規則，nowcast 長期顯示「尚無判據」。
+# 三種機制，時間尺度與證據等級各不相同，分開立規則：
+#
+#   1. 單粒子效應（SEU）／太陽能板劣化／星追蹤器雜訊 —— 太陽高能質子（S 級）
+#      門檻與影響描述直接採 NOAA S 尺度對「衛星」一欄的說明：
+#        S1  無衛星影響（故本網域不設 S1 規則；HF 極區吸收見 hf_comm.yaml）
+#        S2  偶發單粒子翻轉
+#        S3  單粒子翻轉、成像系統雜訊、太陽能板效率略降
+#        S4  記憶體異常、成像雜訊、星追蹤器問題可能影響姿態、太陽能板效率劣化
+#        S5  衛星可能失效、記憶體影響、星追蹤器無法定位、太陽能板永久損傷
+#      → S2→L1、S3→L2、S4→L3、S5→L4。觀測值，inference=observed。
+#
+#   2. 深層介電充電（內部充電）—— 外輻射帶 ≥2 MeV 相對論電子
+#      NOAA 無分級；SWPC 以 1000 pfu 為電子警報門檻。危害來自**累積**：
+#      電子穿入遮蔽材料內部、電荷累積後放電。故以「持續時間」分級，而非尖峰值：
+#        超過 1000 pfu 達 15 分鐘（SWPC 警報的 3 個 5 分鐘點）→ L1
+#        持續 24 小時 → L2
+#        持續 72 小時 → L3
+#      24／72 小時為原型預設，**須與衛星操作單位依各星遮蔽設計校準**。
+#      GOES 位於地球同步軌道：對 GEO 與穿越外輻射帶的 MEO／GTO 直接適用；
+#      對低軌（LEO）僅在高緯穿越輻射帶外緣時相關，事件卡須標明此限制。
+#
+#   3. 表面充電 —— 地磁暴期間注入的熱電漿（keV 電子）
+#      本系統沒有表面充電的直接量測（需 GEO 低能電子通量），只能以 Kp 代理，
+#      依 NOAA G 尺度對太空器的描述：G3「部分元件可能發生表面充電」、
+#      G4「表面充電與追蹤問題」、G5「大範圍表面充電」。
+#      → G3→L1、G4→L2、G5→L3，inference=proxy。代理判據的上限刻意壓在 L3：
+#      沒有直接量測，不得宣稱「重大」。
+#
+# exclusions：衛星異常有大量非太空天氣成因，事件卡必須列出已排除項，
+# 否則操作單位會把每一次異常都歸因於太空天氣（反之亦然）。
+
+domain: SATELLITE_HEALTH
+version: 2026.1-draft
+calibrated: false
+
+rules:
+  # ── 1. 太陽高能質子：單粒子效應 ───────────────────────────────────────
+  - id: SAT-L1-S2
+    name: 輻射風暴 S2：偶發單粒子翻轉
+    when:
+      any:
+        - {param: PROT10, op: ">=", value: 100.0, dwell_h: 0}
+    level: L1
+    hysteresis: {clear_below: 50.0, clear_dwell_h: 6}
+    scale_hint: S2
+    impact: 衛星偶發單粒子翻轉（SEU）；高緯與極軌衛星風險較高
+    action: 納入任務前提示；關鍵指令上傳後確認回讀
+    notify: [衛星操作單位]
+    exclusions: [軟體缺陷, 指令錯誤, 熱控異常, 元件老化]
+
+  - id: SAT-L2-S3
+    name: 輻射風暴 S3：單粒子翻轉與成像雜訊
+    when:
+      any:
+        - {param: PROT10, op: ">=", value: 1000.0, dwell_h: 0}
+    level: L2
+    hysteresis: {clear_below: 500.0, clear_dwell_h: 6}
+    scale_hint: S3
+    impact: 單粒子翻轉增加；光學酬載成像雜訊；太陽能板效率略降
+    action: 通報衛星操作單位；暫緩非必要的軟體上傳與組態變更；成像任務預期雜訊
+    notify: [衛星操作單位, SDA 操作席]
+    exclusions: [軟體缺陷, 指令錯誤, 熱控異常, 元件老化, 酬載校正]
+
+  - id: SAT-L3-S4
+    name: 輻射風暴 S4：記憶體與星追蹤器異常
+    when:
+      any:
+        - {param: PROT10, op: ">=", value: 10000.0, dwell_h: 0}
+    level: L3
+    hysteresis: {clear_below: 5000.0, clear_dwell_h: 12}
+    scale_hint: S4
+    impact: 記憶體異常；星追蹤器誤判可能造成姿態問題；太陽能板效率劣化
+    action: 建議關鍵酬載進入安全模式或延後關鍵操作；加密姿態與電力遙測監看
+    notify: [衛星操作單位, SDA 操作席, 值班主管]
+    exclusions: [軟體缺陷, 指令錯誤, 熱控異常, 元件老化, 姿控硬體故障]
+
+  - id: SAT-L4-S5
+    name: 輻射風暴 S5：衛星可能失效
+    when:
+      any:
+        - {param: PROT10, op: ">=", value: 100000.0, dwell_h: 0}
+    level: L4
+    hysteresis: {clear_below: 50000.0, clear_dwell_h: 12}
+    scale_hint: S5
+    impact: 衛星可能失效；星追蹤器無法定位；太陽能板可能永久損傷
+    action: 啟動重大事件通報；全星隊評估安全模式；事後逐星健康檢查與復盤
+    notify: [衛星操作單位, SDA 操作席, 值班主管, 指揮鏈]
+    exclusions: [軟體缺陷, 指令錯誤, 姿控硬體故障]
+
+  # ── 2. 相對論電子：深層介電充電（累積效應，以持續時間分級）──────────────
+  - id: SAT-L1-ELEC
+    name: 高能電子通量超過警報門檻
+    when:
+      any:
+        - {param: ELEC2, op: ">=", value: 1000.0, dwell_h: 0.25}
+    level: L1
+    hysteresis: {clear_below: 800.0, clear_dwell_h: 3}
+    impact: ≥2 MeV 電子超過 1000 pfu，深層介電充電風險開始累積（GEO／MEO 為主）
+    action: 納入任務前提示；留意遙測中無法解釋的異常是否與通量同步
+    notify: [衛星操作單位]
+    exclusions: [軟體缺陷, 指令錯誤, 熱控異常, 元件老化]
+    requires_params: [ELEC2]
+
+  - id: SAT-L2-ELEC24
+    name: 高能電子通量持續偏高（24 小時）
+    when:
+      any:
+        - {param: ELEC2, op: ">=", value: 1000.0, dwell_h: 24}
+    level: L2
+    hysteresis: {clear_below: 800.0, clear_dwell_h: 6}
+    impact: 高通量持續一日，介電材料內部電荷累積，放電造成元件異常的機率上升
+    action: 通報衛星操作單位；暫緩非必要的高壓設備開關與組態變更
+    notify: [衛星操作單位, SDA 操作席]
+    exclusions: [軟體缺陷, 指令錯誤, 熱控異常, 元件老化]
+    requires_params: [ELEC2]
+
+  - id: SAT-L3-ELEC72
+    name: 高能電子通量長時間偏高（72 小時）
+    when:
+      any:
+        - {param: ELEC2, op: ">=", value: 1000.0, dwell_h: 72}
+    level: L3
+    hysteresis: {clear_below: 800.0, clear_dwell_h: 12}
+    impact: 高通量持續三日，深層充電放電風險高；歷史上 GEO 衛星異常集中於此類期間
+    action: 建議延後關鍵操作與軟體上傳；異常發生時優先以充電放電成因排查
+    notify: [衛星操作單位, SDA 操作席, 值班主管]
+    exclusions: [軟體缺陷, 指令錯誤, 熱控異常, 元件老化]
+    requires_params: [ELEC2]
+
+  # ── 3. 表面充電（Kp 代理；無直接量測，上限 L3）────────────────────────
+  - id: SAT-L1-G3
+    name: 地磁暴 G3：表面充電可能（代理）
+    when:
+      any:
+        - {param: KP_3H, op: ">=", value: 7.0, dwell_h: 0}
+    level: L1
+    hysteresis: {clear_below: 5.0, clear_dwell_h: 6}
+    scale_hint: G3
+    impact: 地磁暴注入熱電漿，衛星部分元件可能發生表面充電（以 Kp 推估，無直接量測）
+    action: 納入任務前提示；GEO 衛星於地方午夜至清晨扇區留意異常
+    notify: [衛星操作單位]
+    exclusions: [軟體缺陷, 指令錯誤, 熱控異常]
+    inference: proxy
+
+  - id: SAT-L2-G4
+    name: 地磁暴 G4：表面充電與追蹤問題（代理）
+    when:
+      any:
+        - {param: KP_3H, op: ">=", value: 8.0, dwell_h: 0}
+    level: L2
+    hysteresis: {clear_below: 6.0, clear_dwell_h: 6}
+    scale_hint: G4
+    impact: 表面充電與姿態／追蹤問題可能發生（以 Kp 推估，無直接量測）
+    action: 通報衛星操作單位；暫緩非必要機動與組態變更
+    notify: [衛星操作單位, SDA 操作席]
+    exclusions: [軟體缺陷, 指令錯誤, 熱控異常, 姿控硬體故障]
+    inference: proxy
+
+  - id: SAT-L3-G5
+    name: 地磁暴 G5：大範圍表面充電（代理）
+    when:
+      any:
+        - {param: KP_3H, op: ">=", value: 9.0, dwell_h: 0}
+    level: L3
+    hysteresis: {clear_below: 7.0, clear_dwell_h: 12}
+    scale_hint: G5
+    impact: 大範圍表面充電，上鏈下鏈與追蹤可能受影響（以 Kp 推估，無直接量測；故上限 L3）
+    action: 建議延後關鍵操作；全星隊加密遙測監看
+    notify: [衛星操作單位, SDA 操作席, 值班主管]
+    exclusions: [軟體缺陷, 指令錯誤, 姿控硬體故障]
+    inference: proxy

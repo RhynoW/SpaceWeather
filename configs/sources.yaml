@@ -151,6 +151,25 @@ sources:
     format: swpc_energy_json
     publication_lag_s: 600
 
+  - source_id: swpc_electrons
+    name: NOAA SWPC GOES integral electrons
+    connector: swpc_json
+    tier: 1
+    attribution:
+      provider: 'NOAA/NWS Space Weather Prediction Center'
+      product: 'GOES 積分電子通量（≥2 MeV）'
+      url: 'https://services.swpc.noaa.gov/'
+      terms: '美國政府公眾領域資料（U.S. Government work, public domain）'
+    status: ready
+    provides: [ELEC2]
+    cadence_s: 300
+    latency_budget_s: 1800
+    # 取 1 日檔而非 6 小時檔：深層充電看的是持續時間，規則的駐留門檻以小時計，
+    # 擷取若中斷數小時，6 小時檔會讓持續段出現缺口而被誤判為已解除。
+    endpoint: https://services.swpc.noaa.gov/json/goes/primary/integral-electrons-1-day.json
+    format: swpc_energy_json
+    publication_lag_s: 600
+
   - source_id: swpc_xray_flares
     name: NOAA SWPC GOES X-ray flare events
     connector: swpc_solar
@@ -253,6 +272,27 @@ sources:
     notes: >
       逐 3 小時 Kp 預報，涵蓋 72 小時。**本案 48 小時預報引擎的對照基準**——
       贏不過官方預報就沒有自建的理由，故必須同場比較而非只跟 persistence 比。
+
+  - source_id: swpc_3day_forecast
+    name: NOAA SWPC 3-day forecast (R/S probabilities)
+    connector: forecast_sources
+    tier: 1
+    attribution:
+      provider: 'NOAA/NWS Space Weather Prediction Center'
+      product: '3 日預報（R／S 機率）'
+      url: 'https://services.swpc.noaa.gov/'
+      terms: '美國政府公眾領域資料（U.S. Government work, public domain）'
+    status: ready
+    provides: [R12_PROB, R3_PROB, S1_PROB]
+    cadence_s: 43200
+    latency_budget_s: 86400
+    publication_lag_s: 0
+    endpoint: https://services.swpc.noaa.gov/text/3-day-forecast.txt
+    format: swpc_3day_forecast_txt
+    notes: >
+      R/S/G 72 小時展望的 R、S 部分：逐 UTC 日的 R1–R2、R3 以上與 S1 以上機率。
+      同檔的 Kp 預報不取——已由 swpc_geomag_forecast 提供，重複入庫只會讓同一
+      valid_time 出現兩個同 tier 的預報值。
 
   - source_id: swpc_27day_outlook
     name: NOAA SWPC 27-day outlook

@@ -352,6 +352,41 @@ params:
     cadence_s: 86400
     impacts: [HF_COMM]
     status: ready
+  # ── NOAA 3 日預報的 R／S 機率（R/S/G 72 小時展望）──────────────────────
+  # 逐 UTC 日一值，valid_time 為該日 00:00。來源預報（PRD），非觀測。
+  - code: R12_PROB
+    name_zh: R1–R2 無線電衰減機率（NOAA 3 日預報）
+    name_en: R1-R2 radio blackout probability
+    unit: "1"
+    domain: solar
+    valid_min: 0.0
+    valid_max: 1.0
+    cadence_s: 86400
+    scale: R
+    impacts: [HF_COMM]
+    status: ready
+  - code: R3_PROB
+    name_zh: R3 以上無線電衰減機率（NOAA 3 日預報）
+    name_en: R3-or-greater radio blackout probability
+    unit: "1"
+    domain: solar
+    valid_min: 0.0
+    valid_max: 1.0
+    cadence_s: 86400
+    scale: R
+    impacts: [HF_COMM]
+    status: ready
+  - code: S1_PROB
+    name_zh: S1 以上太陽輻射風暴機率（NOAA 3 日預報）
+    name_en: S1-or-greater solar radiation storm probability
+    unit: "1"
+    domain: solar
+    valid_min: 0.0
+    valid_max: 1.0
+    cadence_s: 86400
+    scale: S
+    impacts: [HF_COMM, SATELLITE_HEALTH]
+    status: ready
   - code: XRAY_LONG
     name_zh: GOES X-ray 通量 0.1–0.8 nm
     name_en: GOES XRS long
@@ -383,6 +418,20 @@ params:
     cadence_s: 300
     scale: S
     impacts: [HF_COMM, SATCOM, SATELLITE_HEALTH]
+    status: ready
+
+  # 外輻射帶相對論電子。衛星深層介電充電（內部充電）的主要成因：電子穿入
+  # 遮蔽材料內部累積電荷，放電可損壞電子元件。累積效應——持續數日的高通量
+  # 比單次尖峰更危險。NOAA SWPC 以 1000 pfu 為電子警報門檻；無 NOAA 分級。
+  - code: ELEC2
+    name_zh: 電子通量 ≥2 MeV（GOES 積分）
+    name_en: Electron flux >=2 MeV
+    unit: pfu
+    domain: solar
+    valid_min: 0.0
+    valid_max: 10000000.0
+    cadence_s: 300
+    impacts: [SATELLITE_HEALTH]
     status: ready
 
   - code: KP_MAX_DAILY

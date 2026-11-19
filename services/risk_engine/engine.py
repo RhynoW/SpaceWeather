@@ -26,6 +26,7 @@ import pandas as pd
 import yaml
 
 from swx_core import SwxStore, config_dir, registry
+from swx_core.schema import OBSERVED_TYPES
 
 _OPS = {
     ">=": operator.ge,
@@ -234,7 +235,17 @@ class RiskEngine:
         key = (param, start, end, as_of, region)
         if self._memo is not None and key in self._memo:
             return self._memo[key].copy()
-        s = self.store.series(param, start=start, end=end, as_of=as_of, grid_id=region)
+        df = self.store.query(param, start=start, end=end, as_of=as_of, grid_id=region)
+        # 規則判定的是**已發生**的事：參數有觀測資料時只用觀測。觀測落後時，
+        # 缺口不得由預報值補上——否則 Kp 預報 5 就會觸發「地磁暴」，事件卡卻標
+        # inference=observed。只有預測值的參數（閃焰機率）才使用預測列，
+        # 它們只出現在 pre_alert 規則，且等級上限為 L1。
+        if not df.empty:
+            obs_mask = df["data_type"].isin(OBSERVED_TYPES)
+            if obs_mask.any():
+                df = df[obs_mask]
+        s = (pd.Series(dtype="float64", index=pd.DatetimeIndex([], tz="UTC")) if df.empty
+             else df.set_index("valid_time")["value"].astype("float64"))
         if s.index.has_duplicates:
             s = s.groupby(level=0).max()
         s = s.sort_index()
@@ -462,7 +473,17 @@ class RiskEngine:
 
     def nowcast(self, *, as_of: datetime | None = None, lookback_h: float = 48.0) -> pd.DataFrame:
         """各網域當前等級（架構書 §11「太空環境總覽」的紅綠燈資料源）。"""
-        now = pd.Timestamp(as_of, tz="UTC") if as_of else pd.Timestamp.now(tz="UTC")
+        if as_of:
+            # 帶時區的 as_of 不能再傳 tz=（pandas 會拋 ValueError）；無時區者視為 UTC
+            now = pd.Timestamp(as_of)
+            now = now.tz_convert("UTC") if now.tzinfo else now.tz_localize("UTC")
+        else:
+            now = pd.Timestamp.now(tz="UTC")
+        # 回看窗至少要涵蓋最長的駐留門檻（另留 6 小時讓遲滯狀態暖機）。
+        # 否則「持續 72 小時」這類規則在 48 小時窗內永遠不可能成立——
+        # 不會報錯，只是安靜地永遠綠燈。
+        longest = max((c.dwell_h for r in self.rules for c in r.conditions), default=0.0)
+        lookback_h = max(lookback_h, longest + 6.0)
         start = now - timedelta(hours=lookback_h)
         episodes, status = self.evaluate(start=start, end=now, as_of=as_of)
 

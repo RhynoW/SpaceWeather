@@ -39,6 +39,7 @@ from .forecast_sources import (
     Swpc45DayForecastConnector,
     SwpcDrapConnector,
     SwpcGeomagForecastConnector,
+    Swpc3DayForecastConnector,
 )
 
 CONNECTORS: tuple[type[Connector], ...] = (
@@ -52,6 +53,7 @@ CONNECTORS: tuple[type[Connector], ...] = (
     SwpcFlareConnector,
     SwpcSolarRegionsConnector,
     SwpcGeomagForecastConnector,
+    Swpc3DayForecastConnector,
     Swpc27DayOutlookConnector,
     Swpc45DayForecastConnector,
     KyotoDstConnector,

@@ -108,6 +108,71 @@ class SwpcGeomagForecastConnector(Connector):
         return normalize(df)
 
 
+class Swpc3DayForecastConnector(Connector):
+    """NOAA 3 日預報的 R／S 機率（R/S/G 72 小時展望）。
+
+    檔內 B 段「Solar Radiation Storm Forecast」與 C 段「Radio Blackout Forecast」
+    各有一張三欄表（逐 UTC 日）：
+
+                      Nov 19  Nov 20  Nov 21
+        S1 or greater    5%      1%      1%
+        R1-R2           25%     15%     15%
+        R3 or greater    5%      5%      5%
+
+    欄標頭只有月日，年份取自 `:Issued:`；跨年（12/31 發布、涵蓋 1/1）時遞增。
+    """
+
+    formats = ("swpc_3day_forecast_txt",)
+    raw_ext = "txt"
+
+    _ROWS = {
+        "S1 or greater": "S1_PROB",
+        "R1-R2": "R12_PROB",
+        "R3 or greater": "R3_PROB",
+    }
+    _HEADER_RE = re.compile(r"^\s+((?:[A-Z][a-z]{2}\s+\d{1,2}\s*){3})$")
+
+    def parse(self, payload: bytes) -> pd.DataFrame:
+        text = payload.decode("utf-8", errors="replace")
+        issued = None
+        for line in text.splitlines():
+            if line.startswith(":Issued:"):
+                issued = pd.to_datetime(line.split(":Issued:")[1].strip(),
+                                        format="%Y %b %d %H%M UTC", utc=True, errors="coerce")
+                break
+        if issued is None or pd.isna(issued):
+            return empty_frame()
+
+        recs: list[dict] = []
+        dates: list[pd.Timestamp] = []
+        for line in text.splitlines():
+            m = self._HEADER_RE.match(line)
+            if m:
+                dates = []
+                for mon, day in re.findall(r"([A-Z][a-z]{2})\s+(\d{1,2})", m.group(1)):
+                    ts = pd.to_datetime(f"{issued.year} {mon} {day}", format="%Y %b %d",
+                                        utc=True, errors="coerce")
+                    if pd.notna(ts) and ts < issued - pd.Timedelta(days=200):
+                        ts = ts + pd.DateOffset(years=1)          # 跨年
+                    dates.append(ts)
+                continue
+            for label, code in self._ROWS.items():
+                if line.strip().startswith(label) and len(dates) == 3:
+                    # 去掉標籤再找百分比，否則「R1-R2」裡的數字會被誤讀
+                    pcts = re.findall(r"(\d{1,3})\s*%", line.strip()[len(label):])
+                    for ts, pct in zip(dates, pcts):
+                        if pd.notna(ts):
+                            recs.append({"valid_time": ts, "param_code": code,
+                                         "value": int(pct) / 100.0, "unit": "1",
+                                         "data_type": "PRD"})
+        if not recs:
+            return empty_frame()
+        df = pd.DataFrame(recs).drop_duplicates(subset=["valid_time", "param_code"])
+        df["source_id"] = self.spec.source_id
+        df["source_tier"] = self.spec.tier
+        return normalize(df)
+
+
 class Swpc27DayOutlookConnector(Connector):
     """27 日展望（逐日 F10.7 / Ap / 最大 Kp）。"""
 

@@ -591,7 +591,9 @@ def render_status_banner(store, *, hours: int = 6) -> None:
     now = datetime.now(timezone.utc)
     cols = st.columns(len(BANNER_ITEMS))
     for col, (title, code, thresholds, labels, unit) in zip(cols, BANNER_ITEMS):
-        df = store.query(code, start=now - timedelta(hours=hours), end=now)
+        # 只取觀測：「現況」不得由預報值頂替（Kp 有同時刻的 SWPC 預報列）
+        df = store.query(code, start=now - timedelta(hours=hours), end=now,
+                         observed_only=True)
         value = None if df.empty else float(df.sort_values("valid_time").iloc[-1]["value"])
         lvl = _banner_level(value, thresholds)
 
@@ -621,6 +623,82 @@ def render_status_banner(store, *, hours: int = 6) -> None:
                 )
             st.markdown("".join(rungs), unsafe_allow_html=True)
             st.caption("—" if value is None else f"{value:.3g}")
+
+# ── R/S/G 狀態與 72 小時展望（參考 KSWC／SWPC 首頁）──────────────────────
+# 一張表回答三個問題：剛剛發生過什麼、現在如何、NOAA 預期接下來三天如何。
+# 觀測與展望用不同底色分開——後者是 NOAA 的預報，不是已發生的事。
+@st.cache_data(ttl=300)
+def load_rsg() -> dict:
+    return products.rsg_status(get_store())
+
+
+_RSG_COLORS = {0: "#2E7D32", 1: "#F9A825", 2: "#EF6C00", 3: "#C62828"}
+_RSG_NAMES = {"R": "R 無線電衰減", "S": "S 輻射風暴", "G": "G 地磁暴"}
+
+
+def _rsg_cell(level: str | None, has_data: bool, note: str = "") -> str:
+    from swx_core.scales import scale_rank
+
+    if not has_data:
+        return ("<td style='background:#2b2f35;color:#9E9E9E;text-align:center;"
+                "padding:6px'>無資料</td>")
+    rank = scale_rank(level)
+    color = _RSG_COLORS[min(rank, 3)]
+    label = level or "平靜"
+    sub = f"<br><span style='font-size:11px;color:#cfd8dc'>{note}</span>" if note else ""
+    return (f"<td style='background:{color};color:#fff;text-align:center;padding:6px;"
+            f"font-weight:700'>{label}{sub}</td>")
+
+
+def _pct(p) -> str:
+    return "—" if p is None else f"{p * 100:.0f}%"
+
+
+def render_rsg_panel() -> None:
+    try:
+        rsg = load_rsg()
+    except Exception as exc:      # noqa: BLE001 — 單一元件失敗不該讓值勤頁掛掉
+        st.warning(f"R/S/G 狀態載入失敗：{type(exc).__name__}")
+        return
+    days = [d["date_utc"][5:] for d in rsg["outlook"]]
+    head = ("<tr><th></th><th>過去 48–24h</th><th>過去 24h</th><th>現在</th>"
+            + "".join(f"<th style='background:#1f2a36'>{d} 展望</th>" for d in days) + "</tr>")
+    rows = []
+    for key in ("R", "S", "G"):
+        ob = rsg["observed"][key]
+        cells = [_rsg_cell(ob[w]["level"], ob[w]["has_data"])
+                 for w in ("past_48_24h", "past_24h", "current")]
+        for d in rsg["outlook"]:
+            if key == "G":
+                g = d["G"]
+                cells.append(_rsg_cell(g["level"], g["has_data"],
+                                       "" if g["kp_max"] is None else f"Kp 最大 {g['kp_max']}"))
+            elif key == "R":
+                r = d["R"]
+                has = r["r1_r2_prob"] is not None
+                cells.append(
+                    "<td style='background:#1f2a36;color:#e0e0e0;text-align:center;padding:6px'>"
+                    + (f"R1–R2 {_pct(r['r1_r2_prob'])}<br>R3+ {_pct(r['r3_plus_prob'])}"
+                       if has else "<span style='color:#9E9E9E'>無資料</span>") + "</td>")
+            else:
+                p = d["S"]["s1_plus_prob"]
+                cells.append(
+                    "<td style='background:#1f2a36;color:#e0e0e0;text-align:center;padding:6px'>"
+                    + (f"S1+ {_pct(p)}" if p is not None
+                       else "<span style='color:#9E9E9E'>無資料</span>") + "</td>")
+        rows.append(f"<tr><th style='text-align:left;padding:6px'>{_RSG_NAMES[key]}</th>"
+                    + "".join(cells) + "</tr>")
+    st.markdown(
+        "<table style='width:100%;border-collapse:separate;border-spacing:3px;"
+        f"font-size:13px'>{head}{''.join(rows)}</table>",
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "觀測只取量測值（R：GOES X 射線；S：≥10 MeV 質子；G：Kp），「現在」超過容許齡期即顯示無資料。"
+        f"展望為 **NOAA SWPC 3 日預報**（逐 UTC 日，非本系統預報），"
+        f"取得於 {rsg['outlook_retrieved_utc'] or '—'}。R、S 展望為機率，不是等級。"
+    )
+
 
 # ── 側欄 ────────────────────────────────────────────────────────────────
 _ORIGIN = data_origin()
@@ -698,6 +776,8 @@ if page == "值勤模式":
     now = datetime.now(timezone.utc)
 
     render_status_banner(store)
+    st.subheader("NOAA R/S/G：近況與 3 日展望")
+    render_rsg_panel()
     st.divider()
 
     # ── 第一列：各網域燈號 ──────────────────────────────────────────

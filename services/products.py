@@ -34,7 +34,7 @@ from services.risk_engine.eventcard import EventStore, build_event_cards
 __all__ = [
     "nowcast", "evaluate", "rule_status", "event_cards", "stored_event_cards",
     "event_store", "event_notifications", "rules", "risk_engine", "flare_list",
-    "ForecastView", "forecast_view", "forecast_targets",
+    "ForecastView", "forecast_view", "forecast_targets", "rsg_status",
     "stk_cssi_frame", "stk_cssi_text", "stk_cssi_summary", "STK_MODE_SOURCE",
     "drag_correction_table", "drag_correction_metadata",
 ]
@@ -207,18 +207,112 @@ def forecast_view(store: SwxStore, target: str, *, as_of: datetime | None = None
     spec = forecast_targets()[target]
     now = pd.Timestamp(now) if now is not None else pd.Timestamp.now(tz="UTC")
     codes = [c for c in (spec.code, spec.prob_code) if c]
-    df = store.query(codes, start=now - timedelta(days=window_days),
-                     end=now + timedelta(days=3), as_of=as_of)
-    if df.empty:
-        own = reference = observed = df
-    else:
-        own = latest_forecast_batch(df[df["source_id"] == "swx_forecast"])
-        reference = df[df["source_id"] == "swpc_geomag_forecast"]
-        observed = df[(df["param_code"] == spec.code)
-                      & df["data_type"].isin(OBSERVED_TYPES)]
+    win = dict(start=now - timedelta(days=window_days), end=now + timedelta(days=3),
+               as_of=as_of)
+    # 三種列分開查（source_id 在去重之前過濾）。資料層同一時刻觀測優先，
+    # 若混在一次查詢裡再篩，過去時段的預報列會被觀測吃掉，對照線就斷了。
+    own = latest_forecast_batch(store.query(codes, source_id="swx_forecast", **win))
+    reference = store.query(codes, source_id="swpc_geomag_forecast", **win)
+    observed = store.query(spec.code, observed_only=True, **win)
     latest = None if observed.empty else pd.Timestamp(observed["valid_time"].max())
     issued = None if latest is None else latest.floor(spec.grid)
     return ForecastView(spec, own, reference, observed, latest, issued)
+
+
+# ── R/S/G 狀態與 72 小時展望 ────────────────────────────────────────────
+#: 「現在」容許的資料齡期。超過即回報無資料，不拿舊值當現況。
+_CURRENT_MAX_AGE = {"R": timedelta(minutes=30), "S": timedelta(minutes=30),
+                    "G": timedelta(hours=6)}
+
+
+def _window_level(df: pd.DataFrame, codes: tuple[str, ...], fn,
+                  lo: pd.Timestamp, hi: pd.Timestamp) -> dict:
+    sub = df[df["param_code"].isin(codes) & (df["valid_time"] >= lo)
+             & (df["valid_time"] <= hi)] if not df.empty else df
+    if sub.empty:
+        # 無資料與未達門檻是兩件事：前者 has_data=False、level=None
+        return {"level": None, "value": None, "has_data": False}
+    v = float(sub["value"].max())
+    return {"level": fn(v), "value": v, "has_data": True}
+
+
+def rsg_status(store: SwxStore, *, now: datetime | pd.Timestamp | None = None) -> dict:
+    """NOAA R/S/G 三尺度的觀測狀態與 72 小時展望（參考 KSWC／SWPC 首頁呈現）。
+
+    觀測（皆只取觀測列，不含預測）：
+      past_48_24h  [now-48h, now-24h) 內最大值的等級
+      past_24h     [now-24h, now] 內最大值的等級
+      current      最新一筆；超過容許齡期（R/S 30 分鐘、G 6 小時）視為無資料
+    R 取 GOES X 射線（XRAY_LONG 與閃焰峰值 FLARE_PEAK 取大者）、S 取 ≥10 MeV 質子、
+    G 取 Kp。
+
+    展望（NOAA SWPC 預報，逐 **UTC 日**，非「從現在起 24 小時」）：
+      G   該日 3 小時 Kp 預報最大值換算的等級（swpc_geomag_forecast）
+      R   R1–R2、R3 以上機率；S   S1 以上機率（swpc_3day_forecast）
+    展望是 NOAA 的預報、不是本系統的；本系統自己的 Kp 預報另見 /v1/forecast。
+    """
+    from swx_core.scales import g_scale, r_scale, s_scale
+
+    now = pd.Timestamp(now) if now is not None else pd.Timestamp.now(tz="UTC")
+    now = now.tz_convert("UTC") if now.tzinfo else now.tz_localize("UTC")
+    obs = store.query(["XRAY_LONG", "FLARE_PEAK", "PROT10", "KP_3H"],
+                      start=now - timedelta(hours=48), end=now, observed_only=True)
+
+    scales = {"R": (("XRAY_LONG", "FLARE_PEAK"), r_scale),
+              "S": (("PROT10",), s_scale),
+              "G": (("KP_3H",), g_scale)}
+    observed: dict[str, dict] = {}
+    for key, (codes, fn) in scales.items():
+        cur_codes = codes[:1]          # 「現在」只看連續量測，不看事後判定的閃焰峰值
+        cur = obs[obs["param_code"].isin(cur_codes)] if not obs.empty else obs
+        current = {"level": None, "value": None, "has_data": False, "valid_time": None}
+        if not cur.empty:
+            last = cur.sort_values("valid_time").iloc[-1]
+            if now - pd.Timestamp(last["valid_time"]) <= _CURRENT_MAX_AGE[key]:
+                current = {"level": fn(float(last["value"])), "value": float(last["value"]),
+                           "has_data": True,
+                           "valid_time": pd.Timestamp(last["valid_time"]).isoformat()}
+        observed[key] = {
+            "past_48_24h": _window_level(obs, codes, fn, now - timedelta(hours=48),
+                                         now - timedelta(hours=24, microseconds=1)),
+            "past_24h": _window_level(obs, codes, fn, now - timedelta(hours=24), now),
+            "current": current,
+        }
+
+    day0 = now.floor("D")
+    days = [day0 + timedelta(days=i) for i in range(3)]
+    kp_fc = store.query("KP_3H", source_id="swpc_geomag_forecast",
+                        start=day0, end=day0 + timedelta(days=3, microseconds=-1))
+    probs = store.query(["R12_PROB", "R3_PROB", "S1_PROB"], source_id="swpc_3day_forecast",
+                        start=day0, end=day0 + timedelta(days=2))
+
+    def _prob(code: str, day: pd.Timestamp) -> float | None:
+        if probs.empty:
+            return None
+        hit = probs[(probs["param_code"] == code) & (probs["valid_time"] == day)]
+        return None if hit.empty else round(float(hit["value"].iloc[0]), 3)
+
+    outlook = []
+    for d in days:
+        k = kp_fc[(kp_fc["valid_time"] >= d) & (kp_fc["valid_time"] < d + timedelta(days=1))] \
+            if not kp_fc.empty else kp_fc
+        kp_max = None if k.empty else round(float(k["value"].max()), 2)
+        outlook.append({
+            "date_utc": d.strftime("%Y-%m-%d"),
+            "G": {"level": g_scale(kp_max), "kp_max": kp_max, "has_data": kp_max is not None},
+            "R": {"r1_r2_prob": _prob("R12_PROB", d), "r3_plus_prob": _prob("R3_PROB", d)},
+            "S": {"s1_plus_prob": _prob("S1_PROB", d)},
+        })
+
+    issued = [f["ingest_time"].max() for f in (kp_fc, probs) if not f.empty]
+    return {
+        "as_of_utc": now.isoformat(),
+        "observed": observed,
+        "outlook": outlook,
+        "outlook_source": "NOAA SWPC 3-day forecast（逐 UTC 日）",
+        "outlook_retrieved_utc": max(issued).isoformat() if issued else None,
+        "scale_reference": "https://www.swpc.noaa.gov/noaa-scales-explanation",
+    }
 
 
 # ── 匯出 ────────────────────────────────────────────────────────────────

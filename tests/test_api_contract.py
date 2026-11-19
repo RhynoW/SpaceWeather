@@ -26,6 +26,7 @@ DOCUMENTED_ENDPOINTS = {
     ("GET", "/v1/health/data"),
     ("GET", "/v1/obs"),
     ("GET", "/v1/nowcast"),
+    ("GET", "/v1/scales"),
     ("GET", "/v1/forecast"),
     ("GET", "/v1/events"),
     ("GET", "/v1/events/<event_id>"),

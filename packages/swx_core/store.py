@@ -344,12 +344,18 @@ class SwxStore:
             where.append("quality_flag <> ?")
             args.append(QUALITY_REJECTED)
 
+        # **同一時刻觀測優先於預測**，再比 tier 與入庫時間。少了第一個排序鍵，
+        # 同 tier 的預報（如 SWPC 3 日 Kp 預報）因入庫較晚而蓋掉觀測值：
+        # 實測 2026-11-18 03:00 的 Kp 回傳的是預報 3.67 而非觀測——規則引擎、
+        # 現況橫幅都會把預測當成發生過的事。要取預測列者請以 source_id 指定。
+        observed_list = ",".join(f"'{t}'" for t in OBSERVED_TYPES)
         sql = f"""
             SELECT DISTINCT ON (param_code, valid_time, grid_id) *
             FROM read_parquet({globs!r}, union_by_name=true)
             WHERE {' AND '.join(where)}
-            ORDER BY param_code, valid_time, grid_id, source_tier, ingest_time DESC,
-                     revision DESC
+            ORDER BY param_code, valid_time, grid_id,
+                     CASE WHEN data_type IN ({observed_list}) THEN 0 ELSE 1 END,
+                     source_tier, ingest_time DESC, revision DESC
         """
         with self.connect() as con:
             df = con.execute(sql, args).fetchdf()

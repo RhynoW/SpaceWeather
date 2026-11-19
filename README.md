@@ -23,7 +23,7 @@
 | [docs/rtk_ionosphere.md](docs/rtk_ionosphere.md) | **RTK 能不能收斂**——I95 判據、兩種模式的差異，與「平靜日照樣超標」的實測 |
 | [docs/forecast_skill.json](docs/forecast_skill.json) | **上表的機器可讀版**——API 與儀表板的技巧數字由此取得，不手抄 |
 | [docs/density_model_validation.md](docs/density_model_validation.md) | 大氣密度模型配置、修正因子定義與驗證邊界 |
-| [docs/operations_manual.md](docs/operations_manual.md) | **值勤手冊**（燈號判讀、24 條規則處置對照、維運指令、使用邊界） |
+| [docs/operations_manual.md](docs/operations_manual.md) | **值勤手冊**（燈號判讀、34 條規則處置對照、維運指令、使用邊界） |
 | [docs/glossary.md](docs/glossary.md) | **名詞說明與參數判讀**（教育推廣、值勤判讀、常見誤讀） |
 | [docs/research_review.md](docs/research_review.md) | **依公開學術研究的強化檢視**（文獻對照、建議順序） |
 | [docs/cwa_swoo_analysis.md](docs/cwa_swoo_analysis.md) | 中央氣象署 SWOO 架構分析與介接記錄（授權依據、待確認事項） |
@@ -58,7 +58,7 @@ G/R/S 階梯依 **[NOAA Space Weather Scales](https://www.swpc.noaa.gov/noaa-sca
 | **G5** ＝ Kp 9 | **R5** ＝ 2×10⁻³（X20） | **S5** ＝ 10⁵ |
 
 pfu = particle flux unit（粒子·cm⁻²·s⁻¹·sr⁻¹）。
-實作階梯在 `swx_core/flare.py`，並由 `tests/test_contracts.py` 對照上表驗證。
+實作階梯在 `swx_core/scales.py`（G、S；R 沿用 `swx_core/flare.py`），並由 `tests/test_scales.py` **直接解析上表**逐階比對——改了表或改了程式，另一邊會紅燈。
 
 實作階梯與網域對應見 [docs/glossary.md](docs/glossary.md)，程式在 `swx_core/flare.py`。
 
@@ -152,11 +152,11 @@ pip install -r requirements.lock   # 重現本文數字時使用
 
 | 層 | 模組 | 狀態 |
 |---|---|---|
-| 擷取層 | `services/ingest` | ✅ 24 個來源（21 個可運作）：CelesTrak、GFZ ×2、SWPC ×9、Kyoto、NASA OMNI2、**中央氣象署 SWOO**、**福衛七號 TACC ×2**（閃爍 `scn1c2`、精密定軌 `leoOrb`）、**國土測繪中心 e-GNSS I95**。其中 17 個納入背景自動更新 |
-| 資料層 | `packages/swx_core` | ✅ 雙時間軸 Parquet + DuckDB、品質三級制、48 個註冊參數 |
+| 擷取層 | `services/ingest` | ✅ 26 個來源（23 個可運作）：CelesTrak、GFZ ×2、SWPC ×11、Kyoto、NASA OMNI2、**中央氣象署 SWOO**、**福衛七號 TACC ×2**（閃爍 `scn1c2`、精密定軌 `leoOrb`）、**國土測繪中心 e-GNSS I95**。其中 19 個納入背景自動更新 |
+| 資料層 | `packages/swx_core` | ✅ 雙時間軸 Parquet + DuckDB、品質三級制、52 個註冊參數 |
 | 模型層 | `packages/orbit_drag`、`packages/geomag` | ✅ 熱氣層密度／阻力（MSIS 2.1，暴時 ap 模式）＋地磁基準場（IGRF-14）＋TEME↔ITRF 框架轉換（含 EOP，對 astropy 8.0.1 驗證至 0.08 m）；電離層 D 層吸收已接 |
 | 預報層 | `services/forecast` | ⚠️ **功能覆蓋** 四組目標：Kp（3 小時格點，3–48 h）、**Hp30（30 分鐘格點，1／3／6 h）**（構想書要求的 1 小時產品）、以及 **F10.7 與 Ap（日格點，1–45 天）**——後兩者是軌道預測實際依賴的驅動量，只有連續型指標；驗證擂台含命中率、誤警率、**提前量**與可信度四項 KPI。**任何 horizon 皆非正式作業產品**；Hp30 1 h 與 Kp 3–12 h 可作研究參考，**>12 h 為非作業性研究預報**（與 API 的 `not_for_operational_use_beyond_h: 12` 一致） |
-| 風險層 | `services/risk_engine` | ✅ 4 網域 24 條規則、事件卡、作業狀態庫。新增 **GNSS_RTK**：門檻引用國土測繪中心 I95 公告值（8／20／30），是本案唯一有作業單位背書的判據 |
+| 風險層 | `services/risk_engine` | ✅ 5 網域 34 條規則、事件卡、作業狀態庫。新增 **GNSS_RTK**：門檻引用國土測繪中心 I95 公告值（8／20／30），是本案唯一有作業單位背書的判據 |
 | 產品層 | `services/exporter` | ✅ STK/GMAT CSSI 驅動檔、密度修正因子表 |
 | 展示層 | `services/api`、`apps/dashboard` | ✅ REST API＋Streamlit 儀表板（含值勤模式、影像頁、使用指南與四語 STEM 教學頁），端點與頁面集合由契約測試守住，且每頁以 AppTest 實跑驗證可渲染 |
 
@@ -189,10 +189,10 @@ pip install -r requirements.lock   # 重現本文數字時使用
 需夠高取樣率的斜距 TEC，格點 TEC 不可代用）、多頻段影響矩陣的實證校準、
 STK 端實際介接驗證。
 
-分級規則涵蓋 `ORBIT_PREDICTION`、`HF_COMM`、`GNSS_PNT`、`GNSS_RTK` 四個網域，共 24 條。
+分級規則涵蓋 `ORBIT_PREDICTION`、`HF_COMM`、`GNSS_PNT`、`GNSS_RTK`、`SATELLITE_HEALTH` 五個網域，共 34 條。
 
-構想書要求的影響矩陣還包含 VHF/UHF 與 S/X/Ka（SATCOM）、衛星操作。
-這三個網域已宣告於 `configs/params.yaml` 的 `impact_domains`，
+構想書要求的影響矩陣還包含 VHF/UHF 與 S/X/Ka（SATCOM）。
+這兩個網域已宣告於 `configs/params.yaml` 的 `impact_domains`，
 **但尚無任何分級規則**——它們仍會出現在 `/v1/nowcast` 與儀表板上，
 標為 `尚無判據`（`criteria_total = 0`），而不是從表上消失。
 理由與參數層級相同：畫面上少一列與綠燈難以分辨，讀者會把「還沒訂門檻」
@@ -205,6 +205,7 @@ STK 端實際介接驗證。
 | `HF_COMM` | GOES X 射線、質子通量 | — | 判據齊備 |
 | `GNSS_PNT` | 福衛七號掩星 S4、TEC | Kp、閃焰 | L3 需 S4＋ROTI，**只有 S4 時回報 `partial`** |
 | `ORBIT_PREDICTION` | `DRAG_ENHANCEMENT`（leoOrb 反演） | Kp、Ap | 兩組並用：Kp 給前導訊號，實測給量值 |
+| `SATELLITE_HEALTH` | ≥10 MeV 質子（單粒子效應，S2–S5）、GOES ≥2 MeV 電子（深層充電，以**持續時間**分級：15 分鐘／24 小時／72 小時） | Kp（表面充電，G3–G5） | 表面充電無直接量測，代理判據上限 L3；電子門檻 24／72 小時為原型預設，須依各星遮蔽設計與衛星操作單位校準 |
 
 系統刻意把「沒資料」「部分可判」「沒事」分成三態，不會顯示綠燈誤導判讀。
 `partial` 的語意是「已有的判據若超標仍會發報，但沒有告警**不等於**已確認平靜」。
@@ -671,7 +672,7 @@ python tools/make_source_list.py     # → docs/SpaceWeather資料來源清單YY
 
 「可運作」的定義：`configs/sources.yaml` 標 `status: ready`，且在最近一次
 `python -m services.ingest.run --source all` 中完成**連線 → 解析 → 品質標記 → 入庫**
-全程無錯誤。21 個可運作來源中有 **17 個納入背景自動更新**；
+全程無錯誤。23 個可運作來源中有 **19 個納入背景自動更新**；
 `gfz_hp30`（單獨約 46 秒）與 `omni2_hourly`（六年歷史回填）排除於頁面載入路徑外，
 改由手動「完整」按鈕或排程主機處理。未列於上表而標 `planned` 的 3 個來源為 `tw_gnss_tec`、
 `tw_magnetometer`、`tw_ionosonde`，皆屬需機關協調項。
@@ -805,7 +806,7 @@ python tools/media_smoke.py --all            # 設定檔內全部 22 項
 
 ## API
 
-16 個端點：15 個唯讀（無狀態、可快取）＋1 個需授權的事件卡人工發布（預設關閉）。
+17 個端點：16 個唯讀（無狀態、可快取）＋1 個需授權的事件卡人工發布（預設關閉）。
 端點集合由 `tests/test_api_contract.py` 守住——新增端點而未同步本節，測試會紅燈。
 
 **回應語意**（以下為目前實際行為，非規劃）：
@@ -919,6 +920,7 @@ S4 有了、ROTI 仍無來源，故為 `partial`——規則會在 S4 超標時�
 | `GET /v1/health/data` | 各通道資料齡期與品質 |
 | `GET /v1/obs?param=&from=&to=&as_of=` | 觀測序列（`as_of` 觸發回放） |
 | `GET /v1/nowcast` | 各網域當前等級 |
+| `GET /v1/scales` | NOAA R/S/G：過去 48–24 小時、過去 24 小時、現在（只取觀測），以及 NOAA SWPC 3 日展望（G 為逐日 Kp 預報最大值換算的等級；R、S 為機率） |
 | `GET /v1/forecast?target=kp\|hp30&horizon=` | 預報序列，**每一列附該 horizon 的實測技巧與最佳基線** |
 | `GET /v1/events?from=&to=` | 事件卡清單 |
 | `GET /v1/events/{id}` | 單一事件卡（SDA 介接格式） |
@@ -1011,7 +1013,7 @@ python -m services.ingest.refresh --max-age-min 60  # 逾時才更新
 python -m services.ingest.refresh --force --full    # 強制，含重量級來源
 ```
 
-側欄顯示齡期與更新進度，並提供「更新」（17 個快速來源，約 33–55 秒）
+側欄顯示齡期與更新進度，並提供「更新」（19 個快速來源，約 33–55 秒）
 與「完整」（另含 `gfz_hp30`）兩個按鈕。更新一律寫入**真實的 `data/` 目錄**，
 因此雲端首次成功更新後，示範快照的 DEMO 橫幅會自動消失。
 

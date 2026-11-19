@@ -32,6 +32,8 @@ _ENERGY_MAP = {
     # GOES 積分質子
     ">=10 MeV": ("PROT10", "pfu"),
     ">=100 MeV": ("PROT100", "pfu"),
+    # GOES 積分電子（深層充電）
+    ">=2 MeV": ("ELEC2", "pfu"),
 }
 
 # 物件欄名（小寫）→ (param_code, unit)

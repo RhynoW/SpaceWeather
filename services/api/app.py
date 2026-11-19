@@ -315,6 +315,11 @@ def create_app(store: SwxStore | None = None) -> Flask:
         })
 
     # ── 現況與事件 ──────────────────────────────────────────────────────
+    @app.get("/v1/scales")
+    def scales():
+        """NOAA R/S/G：過去 48–24h、過去 24h、現在，與 NOAA 3 日展望。"""
+        return jsonify({**products.rsg_status(store), "data": data_origin()})
+
     @app.get("/v1/nowcast")
     def nowcast():
         return jsonify(
