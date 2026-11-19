@@ -235,6 +235,27 @@ sources:
       Kp 為 3 小時值，暴起始時刻會被糊掉 1–2 小時；「提前量」是構想書明列的 KPI，
       用 3 小時解析度量測 1 小時等級的提前量並不合理。Hp30 把解析度提高 6 倍。
 
+  - source_id: gfz_hp30_nowcast
+    name: GFZ Hp30 near-real-time (JSON API)
+    connector: geomag_sources
+    tier: 2                       # 近即時值事後可能修訂；與完整序列（tier 1）並存時以定稿為準
+    attribution:
+      provider: 'GFZ German Research Centre for Geosciences'
+      product: 'GFZ Potsdam Hp30 高解析地磁指數（近即時）'
+      url: 'https://kp.gfz.de/en/hp30-hp60'
+      terms: 'CC BY 4.0；引用 Yamazaki et al. (2022), Space Weather'
+    status: ready
+    provides: [HP30]
+    cadence_s: 1800
+    latency_budget_s: 7200
+    publication_lag_s: 1800
+    endpoint: 'https://kp.gfz.de/app/json/?start={start}&end={end}&index=Hp30'
+    format: gfz_hp30_json
+    window_days: 3
+    notes: >
+      完整序列檔（gfz_hp30）每日才更新，實測落後 23 小時；1 小時預報的起報錨點
+      因此停在前一天，產生當下目標時刻就已過去。API 約落後 1 小時。
+
   - source_id: swpc_ovation
     name: NOAA SWPC OVATION auroral oval
     connector: geomag_sources

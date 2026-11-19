@@ -5,6 +5,10 @@
               明列的 KPI，用 3 小時解析度去量測 1 小時等級的提前量並不合理。
               Hp30 把時間解析度提高 6 倍，直接改善這個量測。
 
+  gfz_hp30_nowcast  同一指數經 GFZ JSON API 取得的近即時值（落後約 1 小時）。
+              完整序列檔每日才更新、常落後近一天，1 小時預報的起報錨點因此
+              停在前一天，目標時刻在產生當下就已過去（實測落後 23 小時）。
+
   swpc_ovation  極光橢圓沉降能通量機率格網（30–90 分鐘預報）。
               臺灣位處低緯，極光本身無直接影響；有用的是**極光橢圓赤道側邊界緯度**
               ——它是地磁暴強度的直觀指標，邊界越往低緯推進代表擾動越深入，
@@ -69,6 +73,46 @@ class GfzHp30Connector(Connector):
             cutoff = df["valid_time"].max() - pd.Timedelta(days=float(window_days))
             df = df[df["valid_time"] >= cutoff]
 
+        df["source_id"] = self.spec.source_id
+        df["source_tier"] = self.spec.tier
+        df["data_type"] = "OBS"
+        return normalize(df)
+
+
+class GfzHp30NowcastConnector(Connector):
+    """GFZ Hp30 近即時值（JSON API）。
+
+    與 `gfz_hp30` 是同一指數，差在發布路徑：API 約落後 1 小時，完整序列檔每日更新。
+    近即時值事後可能被修訂，因此 tier 設得比完整序列低——兩者同時存在時以定稿值為準。
+    API 一次查 Hp30、另一次查 ap30 才完整，這裡只取 Hp30：預報只用 Hp30，
+    ap30 由完整序列提供即可，不為它多打一次對方的 API。
+    """
+
+    formats = ("gfz_hp30_json",)
+    raw_ext = "json"
+
+    def endpoint_url(self) -> str:
+        days = float(self.spec.raw.get("window_days", 3))
+        end = pd.Timestamp.now(tz="UTC").ceil("h")
+        start = end - pd.Timedelta(days=days)
+        fmt = "%Y-%m-%dT%H:%M:%SZ"
+        return self.spec.endpoint.format(start=start.strftime(fmt), end=end.strftime(fmt))
+
+    def parse(self, payload: bytes) -> pd.DataFrame:
+        try:
+            data = json.loads(payload.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self.warn("GFZ API 回應不是 JSON")
+            return empty_frame()
+        times, values = data.get("datetime") or [], data.get("Hp30") or []
+        recs = [
+            {"valid_time": pd.Timestamp(t), "param_code": "HP30", "value": float(v), "unit": "1"}
+            for t, v in zip(times, values)
+            if v is not None and float(v) >= 0
+        ]
+        if not recs:
+            return empty_frame()
+        df = pd.DataFrame(recs)
         df["source_id"] = self.spec.source_id
         df["source_tier"] = self.spec.tier
         df["data_type"] = "OBS"

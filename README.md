@@ -152,7 +152,7 @@ pip install -r requirements.lock   # 重現本文數字時使用
 
 | 層 | 模組 | 狀態 |
 |---|---|---|
-| 擷取層 | `services/ingest` | ✅ 26 個來源（23 個可運作）：CelesTrak、GFZ ×2、SWPC ×11、Kyoto、NASA OMNI2、**中央氣象署 SWOO**、**福衛七號 TACC ×2**（閃爍 `scn1c2`、精密定軌 `leoOrb`）、**國土測繪中心 e-GNSS I95**。其中 19 個納入背景自動更新 |
+| 擷取層 | `services/ingest` | ✅ 27 個來源（24 個可運作）：CelesTrak、GFZ ×3、SWPC ×11、Kyoto、NASA OMNI2、**中央氣象署 SWOO**、**福衛七號 TACC ×2**（閃爍 `scn1c2`、精密定軌 `leoOrb`）、**國土測繪中心 e-GNSS I95**。其中 20 個納入背景自動更新 |
 | 資料層 | `packages/swx_core` | ✅ 雙時間軸 Parquet + DuckDB、品質三級制、52 個註冊參數 |
 | 模型層 | `packages/orbit_drag`、`packages/geomag` | ✅ 熱氣層密度／阻力（MSIS 2.1，暴時 ap 模式）＋地磁基準場（IGRF-14）＋TEME↔ITRF 框架轉換（含 EOP，對 astropy 8.0.1 驗證至 0.08 m）；電離層 D 層吸收已接 |
 | 預報層 | `services/forecast` | ⚠️ **功能覆蓋** 四組目標：Kp（3 小時格點，3–48 h）、**Hp30（30 分鐘格點，1／3／6 h）**（構想書要求的 1 小時產品）、以及 **F10.7 與 Ap（日格點，1–45 天）**——後兩者是軌道預測實際依賴的驅動量，只有連續型指標；驗證擂台含命中率、誤警率、**提前量**與可信度四項 KPI。**任何 horizon 皆非正式作業產品**；Hp30 1 h 與 Kp 3–12 h 可作研究參考，**>12 h 為非作業性研究預報**（與 API 的 `not_for_operational_use_beyond_h: 12` 一致） |
@@ -655,6 +655,7 @@ python tools/make_source_list.py     # → docs/SpaceWeather資料來源清單YY
 | **e-GNSS I95**（國土測繪中心） | 基準站網電離層誤差指標，分本島 VRS／金門／澎湖三網 | ✅ 已納入自動更新（實測 3–4 秒）。**授權申請中**（經夏漢民太空中心）。官方僅以圖表發布，數值由圖表擷取，標 `suspect`／tier 2 |
 | **SWPC 45 日 Ap／F10.7 預報** | 逐日驅動量預測，45 天 | ✅ **軌道預測實際依賴的量**，也是預報擂台上要打敗的作業基線。無回填管道（只發布當前一份），故實測成績自輪詢之日起累積 |
 | GFZ Hp30／ap30 | 30 分鐘地磁指數 | ✅ 提升暴起始時刻解析度；**1 小時預報的目標變數**（例行只解析近 120 天，訓練用歷史以 `--reparse --window-days` 回填） |
+| GFZ Hp30（近即時） | 同一指數經 JSON API 取得，落後約 1 小時 | ✅ 完整序列檔每日才更新（實測落後 23 小時），1 小時預報的起報錨點須靠它；tier 2，與定稿值並存時以定稿為準 |
 | SWPC GOES X-ray | 0.05–0.4 / 0.1–0.8 nm 通量 | ✅ |
 | SWPC GOES 閃焰事件 | 閃焰起訖時間與 A–X 分級 | ✅ |
 | SWPC GOES 積分質子 | ≥10 MeV | ✅ |
@@ -675,7 +676,7 @@ python tools/make_source_list.py     # → docs/SpaceWeather資料來源清單YY
 
 「可運作」的定義：`configs/sources.yaml` 標 `status: ready`，且在最近一次
 `python -m services.ingest.run --source all` 中完成**連線 → 解析 → 品質標記 → 入庫**
-全程無錯誤。23 個可運作來源中有 **19 個納入背景自動更新**；
+全程無錯誤。24 個可運作來源中有 **20 個納入背景自動更新**；
 `gfz_hp30`（單獨約 46 秒）與 `omni2_hourly`（六年歷史回填）排除於頁面載入路徑外，
 改由手動「完整」按鈕或排程主機處理。未列於上表而標 `planned` 的 3 個來源為 `tw_gnss_tec`、
 `tw_magnetometer`、`tw_ionosonde`，皆屬需機關協調項。
@@ -1017,14 +1018,27 @@ python -m services.ingest.refresh --max-age-min 60  # 逾時才更新
 python -m services.ingest.refresh --force --full    # 強制，含重量級來源
 ```
 
-側欄顯示齡期與更新進度，並提供「更新」（19 個快速來源，約 33–55 秒）
+側欄顯示齡期與更新進度，並提供「更新」（20 個快速來源，約 33–55 秒）
 與「完整」（另含 `gfz_hp30`）兩個按鈕。更新一律寫入**真實的 `data/` 目錄**，
 因此雲端首次成功更新後，示範快照的 DEMO 橫幅會自動消失。
 
 判斷齡期用的是 `ingest_time` 而非 `valid_time`——後者舊可能只是該通道本來就
 更新得慢，重抓也不會變新。且**必須排除未來時刻**：CelesTrak 月預測列的
-`valid_time` 遠到 2041 年，回填推算的 `ingest_time` 也在未來，
-不濾掉會讓齡期變負值、自動更新永遠不觸發（有測試守住）。
+`valid_time` 遠到 2041 年；舊版回填推算的 `ingest_time` 也曾落在未來（已修正並修補資料，
+見 [docs/architecture.md](docs/architecture.md) §16.2 G13）。不濾掉會讓齡期變負值、
+自動更新永遠不觸發（有測試守住）。
+
+**雲端的預報頁顯示的是快照。** 預報模型需要多年的 Hp30／Kp 歷史才能訓練，
+雲端是空容器、只擷取近幾天資料，無法自行產生預報。預報頁在資料庫找不到本系統預報時，
+改讀隨版本發布的 `data/demo/forecast_snapshot/`，並在圖上方標明產生時刻與「不是此刻的預報」。
+快照與示範快照分開存放（後者停在另一個時刻，混進去會讓 CSSI 快照比對失真）。更新快照：
+
+```bash
+python -m services.ingest.run --source gfz_hp30_nowcast   # 起報錨點要新（完整序列檔落後近一天）
+python -m services.forecast.run --predict --write --target hp30
+python -m services.forecast.run --predict --write --target kp
+python tools/make_forecast_snapshot.py                     # 整個重建；觀測與官方對照只取產生當下已知的版本
+```
 
 ### Streamlit Cloud
 

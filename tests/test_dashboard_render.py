@@ -208,3 +208,25 @@ def test_duty_page_explains_empty_rsg_panel(tmp_path, monkeypatch):
     text = " ".join(str(b.value) for b in app.info)
     assert "R/S/G 目前全無資料" in text
     assert "swpc_3day_forecast" in text and "not_run" in text
+
+
+def test_forecast_page_falls_back_to_labelled_snapshot(tmp_path, monkeypatch):
+    """資料庫沒有本系統預報時（雲端恆是如此），預報頁顯示快照並標明不是此刻的預報。"""
+    from services import products
+
+    if not (products.forecast_snapshot_dir() / "meta.json").exists():
+        pytest.skip("無預報快照")
+    monkeypatch.setenv("SWX_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SWX_DASHBOARD_INGEST", "off")
+    import streamlit as _st
+
+    _st.cache_data.clear()
+    _st.cache_resource.clear()
+
+    app = AppTest.from_file(APP_PATH, default_timeout=120)
+    app.run()
+    app.sidebar.radio[0].set_value("短時預報").run()
+    assert not app.exception, [str(e.message) for e in app.exception]
+    warn = " ".join(str(w.value) for w in app.warning)
+    assert "預報快照，不是此刻的預報" in warn
+    assert not any("尚未產生本系統預報" in str(i.value) for i in app.info)

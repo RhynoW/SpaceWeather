@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -35,6 +36,7 @@ __all__ = [
     "nowcast", "evaluate", "rule_status", "event_cards", "stored_event_cards",
     "event_store", "event_notifications", "rules", "risk_engine", "flare_list",
     "ForecastView", "forecast_view", "forecast_targets", "rsg_status",
+    "forecast_snapshot_dir", "forecast_snapshot_view",
     "stk_cssi_frame", "stk_cssi_text", "stk_cssi_summary", "STK_MODE_SOURCE",
     "drag_correction_table", "drag_correction_metadata",
 ]
@@ -217,6 +219,42 @@ def forecast_view(store: SwxStore, target: str, *, as_of: datetime | None = None
     latest = None if observed.empty else pd.Timestamp(observed["valid_time"].max())
     issued = None if latest is None else latest.floor(spec.grid)
     return ForecastView(spec, own, reference, observed, latest, issued)
+
+
+# ── 預報快照（雲端無法自行產生預報時的退路）─────────────────────────────
+def forecast_snapshot_dir() -> Path:
+    """隨版本發布的預報快照目錄（`tools/make_forecast_snapshot.py` 產生）。
+
+    為什麼需要：預報模型要多年的 Hp30／Kp 歷史才能訓練，雲端是空容器、
+    只會擷取近幾天的資料，**永遠無法自己產生預報**（冷啟動實測：預報頁恆為
+    「尚未產生」）。快照與示範快照分開存放——示範快照停在另一個時刻，
+    混進去會讓 CSSI 快照比對與快照時刻都失真。
+    """
+    from swx_core.config import project_root
+
+    return project_root() / "data" / "demo" / "forecast_snapshot"
+
+
+def forecast_snapshot_view(target: str) -> tuple[ForecastView, dict] | None:
+    """快照裡該目標的預報視圖與中繼資料；無快照或無此目標時回 None。
+
+    視圖以快照的產生時刻為「現在」，畫面上的觀測脈絡、起報錨點、horizon
+    都與當時一致——不拿今天的觀測去對一份幾週前的預報。
+    """
+    import json
+
+    root = forecast_snapshot_dir()
+    meta_path = root / "meta.json"
+    if not meta_path.exists():
+        return None
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    entry = (meta.get("targets") or {}).get(target)
+    if not entry:
+        return None
+    view = forecast_view(SwxStore(root), target, now=pd.Timestamp(entry["generated_utc"]))
+    if view.own.empty:
+        return None
+    return view, {**entry, "note": meta.get("note")}
 
 
 # ── R/S/G 狀態與 72 小時展望 ────────────────────────────────────────────

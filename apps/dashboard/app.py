@@ -1222,6 +1222,12 @@ elif page == "短時預報":
     # 與 API /v1/forecast 同一份實作：查詢視窗、prob_code 為 None 的處理、
     # 起報錨點對齊格點皆在產品層（services.products.forecast_view）
     view = products.forecast_view(get_store(), target, now=end_t)
+    # 沒有即時預報時退回隨版本發布的快照（雲端恆為此情況：無多年歷史可訓練）
+    snapshot_meta = None
+    if view.own.empty:
+        snap = products.forecast_snapshot_view(target)
+        if snap is not None:
+            view, snapshot_meta = snap
     own, swpc, obs, issued = view.own, view.reference, view.observed, view.issued
 
     st.subheader("這個 horizon 的實測技巧")
@@ -1286,6 +1292,16 @@ elif page == "短時預報":
 
     st.divider()
     st.subheader("預報序列")
+    if snapshot_meta is not None:
+        gen = pd.Timestamp(snapshot_meta["generated_utc"])
+        age_h = (pd.Timestamp(end_t) - gen).total_seconds() / 3600
+        st.warning(
+            f"📦 **預報快照，不是此刻的預報。** 產生於 **{gen:%Y-%m-%d %H:%M} UTC**"
+            f"（{age_h:.0f} 小時前），起報錨點 {pd.Timestamp(snapshot_meta['anchor_utc']):%m-%d %H:%M} UTC。"
+            "本站台的資料庫沒有本系統預報：預報模型需要多年的地磁指數歷史才能訓練，"
+            "雲端只擷取近幾天的資料，因此改顯示開發環境產生、隨版本發布的一批，"
+            "觀測與官方對照也都是當時的資料。"
+        )
     fig = go.Figure()
     if not obs.empty:
         fig.add_scatter(x=obs["valid_time"], y=obs["value"], name="觀測", line=dict(width=3))

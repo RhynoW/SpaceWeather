@@ -259,3 +259,18 @@ def test_api_scales_endpoint(rsg_store, monkeypatch):
     body = create_app(rsg_store).test_client().get("/v1/scales").get_json()
     assert body["observed"]["G"]["current"]["level"] == "G2"
     assert len(body["outlook"]) == 3 and "data" in body
+
+
+
+def test_gfz_hp30_nowcast_parse_and_url():
+    """近即時 Hp30：負值為缺值碼；網址帶查詢期間（端點是樣板，不是固定網址）。"""
+    from swx_core import SwxStore as _S
+
+    conn = build(catalog()["gfz_hp30_nowcast"], _S())
+    url = conn.endpoint_url()
+    assert "{" not in url and "start=" in url and "index=Hp30" in url
+    payload = b'{"datetime": ["2026-11-19T21:00:00Z", "2026-11-19T21:30:00Z", "2026-11-19T22:00:00Z"],'               b' "Hp30": [1.667, -1, 2.0], "meta": {}}'
+    df = conn.parse(payload)
+    assert list(df["value"]) == [1.667, 2.0]
+    assert set(df["data_type"]) == {"OBS"} and set(df["param_code"]) == {"HP30"}
+    assert catalog()["gfz_hp30_nowcast"].tier > catalog()["gfz_hp30"].tier, "定稿值須優先"

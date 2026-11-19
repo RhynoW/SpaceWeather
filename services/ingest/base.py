@@ -142,10 +142,11 @@ class Connector(ABC):
         """
         errors: list[str] = []
         if self.spec.endpoint:
+            url = self.endpoint_url()
             for attempt in range(1, self.retry_attempts + 1):
                 try:
                     with _session_for(self.spec) as sess:
-                        resp = sess.get(self.spec.endpoint, timeout=self.timeout_s)
+                        resp = sess.get(url, timeout=self.timeout_s)
                     resp.raise_for_status()
                     return resp.content, "remote"
                 except Exception as exc:  # noqa: BLE001 - 需容忍任何網路層例外
@@ -161,6 +162,10 @@ class Connector(ABC):
             f"{self.spec.source_id} 無法取得資料：{'; '.join(errors) or '未設定 endpoint'}"
             + ("（且無 local_fallback）" if not local else f"（local_fallback 不存在：{local}）")
         )
+
+    def endpoint_url(self) -> str:
+        """實際請求的網址。需要帶查詢期間等動態參數的來源覆寫此方法。"""
+        return self.spec.endpoint
 
     def warn(self, message: str) -> None:
         """記下部分失敗，由 run() 一併回報。parse() 內呼叫。"""

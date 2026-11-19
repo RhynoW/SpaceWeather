@@ -1,0 +1,24 @@
+{
+  "note": "開發環境產生、隨版本發布的預報快照，不是此刻的預報。雲端只擷取近幾天資料，無法訓練需要多年歷史的預報模型。",
+  "generated_from_head": "afc9f82",
+  "targets": {
+    "hp30": {
+      "generated_utc": "2026-11-19T22:54:36.545149+00:00",
+      "anchor_utc": "2026-11-19T22:00:00+00:00",
+      "rows": {
+        "forecast": 6,
+        "observed": 143,
+        "reference": 0
+      }
+    },
+    "kp": {
+      "generated_utc": "2026-11-19T22:52:56.743926+00:00",
+      "anchor_utc": "2026-11-19T21:00:00+00:00",
+      "rows": {
+        "forecast": 10,
+        "observed": 1092,
+        "reference": 40
+      }
+    }
+  }
+}
