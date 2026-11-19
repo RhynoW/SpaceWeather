@@ -237,6 +237,22 @@ def test_rsg_outlook_uses_noaa_forecast(rsg_store):
     assert out[2]["S"] == {"s1_plus_prob": 0.01}
 
 
+
+def test_rsg_outlook_follows_newest_product_after_2200_issue(rsg_store):
+    """NOAA 於 22:00 UTC 發布隔天起的三天。發布後到 UTC 換日前，展望要換成新的三天，
+    不能固定從「今天」排起——否則第一欄是被取代的舊預報、真正的第三天被切掉
+    （冷啟動實測：雲端只有最新一份時，第一欄整欄「無資料」）。"""
+    newer = (THREE_DAY.replace(b"1230 UTC", b"2200 UTC")
+             .replace(b"Nov 21", b"Nov 22").replace(b"Nov 20", b"Nov 21")
+             .replace(b"Nov 19", b"Nov 20").replace(b"Issued: 2026 Nov 20", b"Issued: 2026 Nov 19"))
+    late = pd.Timestamp("2026-11-19T22:30Z")
+    probs = build(catalog()["swpc_3day_forecast"], rsg_store).parse(newer)
+    rsg_store.write(probs, ingest_time=late.to_pydatetime())
+    out = products.rsg_status(rsg_store, now=late)["outlook"]
+    assert [d["date_utc"] for d in out] == ["2026-11-20", "2026-11-21", "2026-11-22"]
+    assert out[0]["R"] == {"r1_r2_prob": 0.25, "r3_plus_prob": 0.05}, "應取新一份的第一天"
+    assert out[2]["S"] == {"s1_plus_prob": 0.01}
+
 def test_api_scales_endpoint(rsg_store, monkeypatch):
     monkeypatch.setattr(products.pd.Timestamp, "now",
                         classmethod(lambda cls, tz=None: NOW))

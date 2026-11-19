@@ -147,7 +147,9 @@ sources:
     provides: [PROT10]
     cadence_s: 300
     latency_budget_s: 1800
-    endpoint: https://services.swpc.noaa.gov/json/goes/primary/integral-protons-6-hour.json
+    # 取 3 日檔（約 0.7 MB）：R/S/G 表的「過去 48–24h／過去 24h」要有完整時窗。
+    # 雲端每次重啟都是空容器，6 小時檔會讓「過去 24h 平靜」只看了 6 小時（冷啟動實測）。
+    endpoint: https://services.swpc.noaa.gov/json/goes/primary/integral-protons-3-day.json
     format: swpc_energy_json
     publication_lag_s: 600
 
@@ -164,9 +166,10 @@ sources:
     provides: [ELEC2]
     cadence_s: 300
     latency_budget_s: 1800
-    # 取 1 日檔而非 6 小時檔：深層充電看的是持續時間，規則的駐留門檻以小時計，
-    # 擷取若中斷數小時，6 小時檔會讓持續段出現缺口而被誤判為已解除。
-    endpoint: https://services.swpc.noaa.gov/json/goes/primary/integral-electrons-1-day.json
+    # 取 3 日檔（約 90 KB）：深層充電看的是持續時間，最長駐留門檻 72 小時。
+    # 擷取若中斷，短檔會讓持續段出現缺口而被誤判為已解除；雲端重啟後是空容器，
+    # 1 日檔下 24／72 小時規則根本不可能成立（冷啟動實測）。
+    endpoint: https://services.swpc.noaa.gov/json/goes/primary/integral-electrons-3-day.json
     format: swpc_energy_json
     publication_lag_s: 600
 

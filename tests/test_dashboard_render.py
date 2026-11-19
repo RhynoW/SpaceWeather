@@ -187,3 +187,24 @@ def test_stem_renders_every_referenced_still():
     failures = [w.value for w in app.warning
                 if any(w.value.startswith(b) for b in bad_prefixes if b)]
     assert not failures, f"STEM 頁出現載入失敗：{failures}"
+
+
+def test_duty_page_explains_empty_rsg_panel(tmp_path, monkeypatch):
+    """R/S/G 整張表無資料時，畫面要說出原因與各來源更新狀態。
+
+    冷啟動實測：雲端全新容器只有示範快照，不含 GOES 與 NOAA 3 日預報；
+    背景更新完成前整張表全空，研討會第一批訪客看到的就是這個畫面。
+    """
+    monkeypatch.setenv("SWX_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SWX_DASHBOARD_INGEST", "off")
+    import streamlit as _st
+
+    _st.cache_data.clear()
+    _st.cache_resource.clear()
+
+    app = AppTest.from_file(APP_PATH, default_timeout=120)
+    app.run()
+    assert not app.exception, [str(e.message) for e in app.exception]
+    text = " ".join(str(b.value) for b in app.info)
+    assert "R/S/G 目前全無資料" in text
+    assert "swpc_3day_forecast" in text and "not_run" in text

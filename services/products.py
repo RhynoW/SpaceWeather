@@ -279,12 +279,22 @@ def rsg_status(store: SwxStore, *, now: datetime | pd.Timestamp | None = None) -
             "current": current,
         }
 
+    # 展望的三天跟著「最新一份」NOAA 3 日預報走，而不是固定從今天排起：
+    # 該產品於 22:00 UTC 發布、涵蓋**隔天起**三天。固定從今天排的話，
+    # 發布後到 UTC 換日前，第一欄是已被取代的舊預報或空白，真正的第三天反被切掉。
     day0 = now.floor("D")
-    days = [day0 + timedelta(days=i) for i in range(3)]
+    probs_all = store.query(["R12_PROB", "R3_PROB", "S1_PROB"], source_id="swpc_3day_forecast",
+                            start=day0, end=day0 + timedelta(days=4))
+    first = day0
+    if not probs_all.empty:
+        newest = probs_all[probs_all["ingest_time"] == probs_all["ingest_time"].max()]
+        first = pd.Timestamp(newest["valid_time"].min()).floor("D")
+    days = [first + timedelta(days=i) for i in range(3)]
+    probs = probs_all[(probs_all["valid_time"] >= first)
+                      & (probs_all["valid_time"] < first + timedelta(days=3))] \
+        if not probs_all.empty else probs_all
     kp_fc = store.query("KP_3H", source_id="swpc_geomag_forecast",
-                        start=day0, end=day0 + timedelta(days=3, microseconds=-1))
-    probs = store.query(["R12_PROB", "R3_PROB", "S1_PROB"], source_id="swpc_3day_forecast",
-                        start=day0, end=day0 + timedelta(days=2))
+                        start=first, end=first + timedelta(days=3, microseconds=-1))
 
     def _prob(code: str, day: pd.Timestamp) -> float | None:
         if probs.empty:

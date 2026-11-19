@@ -654,6 +654,33 @@ def _pct(p) -> str:
     return "—" if p is None else f"{p * 100:.0f}%"
 
 
+_RSG_SOURCES = ("swpc_xray", "swpc_protons", "swpc_kp_estimated", "swpc_3day_forecast")
+
+
+def _explain_empty_rsg(rsg: dict) -> None:
+    """整張表都無資料時說出原因，不讓一整排「無資料」自己說話。
+
+    冷啟動實測：雲端是全新容器，示範快照不含 GOES 與 NOAA 3 日預報，
+    開站背景更新完成前（約一到兩分鐘）整張表全空——研討會掃 QR 進來的
+    第一批人看到的正是這個畫面。
+    """
+    obs_any = any(rsg["observed"][k][w]["has_data"]
+                  for k in "RSG" for w in ("past_48_24h", "past_24h", "current"))
+    out_any = any(d["G"]["has_data"] or d["R"]["r1_r2_prob"] is not None
+                  or d["S"]["s1_plus_prob"] is not None for d in rsg["outlook"])
+    if obs_any or out_any:
+        return
+    notes = {sid: source_refresh_note(sid) for sid in _RSG_SOURCES}
+    if any(code == "running" for code, _ in notes.values()):
+        st.info(f"**R/S/G 資料更新中**——{next(iter(notes.values()))[1]}。"
+                "完成後重新整理即會出現（通常一到兩分鐘）。")
+        return
+    why = "；".join(f"`{sid}`：{code}" for sid, (code, _msg) in notes.items())
+    lead = ("示範快照不含 GOES 與 NOAA 3 日預報，需由站台更新取得。"
+            if _ORIGIN["is_demo"] else "")
+    st.info(f"**R/S/G 目前全無資料。**{lead}最近一次更新的結果——{why}")
+
+
 def render_rsg_panel() -> None:
     try:
         rsg = load_rsg()
@@ -693,6 +720,7 @@ def render_rsg_panel() -> None:
         f"font-size:13px'>{head}{''.join(rows)}</table>",
         unsafe_allow_html=True,
     )
+    _explain_empty_rsg(rsg)
     st.caption(
         "觀測只取量測值（R：GOES X 射線；S：≥10 MeV 質子；G：Kp），「現在」超過容許齡期即顯示無資料。"
         f"展望為 **NOAA SWPC 3 日預報**（逐 UTC 日，非本系統預報），"
