@@ -407,6 +407,7 @@ GET  /v1/matrix/band-impact                  多頻段影響矩陣與查核表
 GET  /v1/exports/stk/spaceweather.txt        STK CSSI 驅動檔
 GET  /v1/exports/jb2008/{solfsmy|dtcfile}    JB2008 驅動檔
 GET  /v1/exports/drag-correction?alt=&from=  密度修正因子表
+GET  /v1/drag/outlook?days=&bc=&lat=&lon=   30 日低軌阻力展望
 GET  /v1/layers/{layer}.geojson              GIS 風險圖層
 GET  /v1/layers/{layer}.czml                 ← 複用既有 CZML 產生器(A14)，Cesium 直接吃
 GET  /v1/stream/alerts                       SSE 即時告警
@@ -710,6 +711,7 @@ SpaceWeather/
 | G13 | **回填把預測列的入庫時間推到未來** | `--backfill` 一律 `valid_time＋延遲`；08-17 種子回填因此產生 1,253 筆入庫時間在 2026-12 到 2041 年的月預測列（本機庫與示範快照各一份）。它們在「取最新」時永遠勝出，蓋掉之後每份較新的預測，月初日被拉進 MONTHLY_PREDICTED | `backfill_ingest_time`：觀測列維持 `valid_time＋延遲`，預測列記為取得時間，任何列都不晚於取得時間。既有資料以 `tools/repair_backfill_ingest_time.py` 修補（只改入庫時間、不刪列不改值；以「恰為 valid_time＋延遲」為指紋，各修 2,430 列） | `test_backfill_never_stamps_ingest_time_in_the_future` |
 | G14 | **`with_source` 匯出混入 SWPC 預測** | 模式說明為「觀測＋CelesTrak 自帶預測」，實作撈全部來源再去重；同為 tier 1 的 SWPC Kp／F10.7 預報混入預測段，同一列 Kp 與 Ap 對不上（10-30：Kp 2.33 配 Ap 5），STK 讀到自相矛盾的驅動值且不報錯 | 觀測取任何來源（已定稿列驗證一致），預測在去重**前**限定 `celestrak_sw_all` | `test_with_source_takes_predictions_only_from_celestrak` |
 | G15 | **雲端預報頁恆為「尚未產生」**；R/S/G 冷啟動缺陷 | 冷啟動實測（乾淨 clone、只有示範快照 → 背景更新後）：預報模型需多年歷史，雲端只擷取近幾天，永遠無法自行產生預報；示範快照的預報停在 08-25、早已超出查詢窗。另：Hp30 完整序列檔每日更新、實測落後 23 小時，1 小時預報產生當下目標時刻即已過去；R/S/G 展望固定從今天排起、質子／電子短檔使過去時窗不完整、開站更新前整表全空無說明 | 預報快照 `data/demo/forecast_snapshot/`（`tools/make_forecast_snapshot.py`，觀測與官方對照取 as_of＝產生時刻），預報頁無即時預報時退回並標示；新增 `gfz_hp30_nowcast`（GFZ JSON API，落後約 1 小時，tier 2）；展望跟著最新一份預報；GOES 質子、電子改 3 日檔；空表說明原因與各來源狀態 | `tests/test_forecast_snapshot.py`、`test_forecast_page_falls_back_to_labelled_snapshot`、`test_duty_page_explains_empty_rsg_panel`、`test_rsg_outlook_follows_newest_product_after_2200_issue`、`test_gfz_hp30_nowcast_parse_and_url` |
+| G16 | **無前瞻的低軌阻力產品**（國際對標：KSWC、NICT） | 密度頁只有事件期間的修正因子與「驅動量選擇值多少公里」的不確定度分析，沒有「未來 30 天各高度帶預期掉多少」 | `services/exporter/drag_outlook.py`＋`products.drag_outlook`＋`GET /v1/drag/outlook`＋密度頁首區塊：SWPC 45 日預報驅動，MSIS 2.1＋能量法逐 3 小時積分；各高度帶 30 天高度下降、密度模型 ±1σ（實測校準 σ）、地磁貢獻（同 F10.7、Ap=4 基準相減）、預報活躍日。驅動量於去重前限定 `swpc_45day_forecast`；明載「非地磁暴預報」與誤差帶不含驅動量誤差 | `tests/test_drag_outlook.py`（物理方向、B 線性、來源界線、輸入檢查、API 400／503）、`test_density_page_explains_missing_drag_outlook` |
 
 ### 尚未修正（依建議順序）
 

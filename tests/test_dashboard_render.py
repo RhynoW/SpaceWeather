@@ -230,3 +230,20 @@ def test_forecast_page_falls_back_to_labelled_snapshot(tmp_path, monkeypatch):
     warn = " ".join(str(w.value) for w in app.warning)
     assert "預報快照，不是此刻的預報" in warn
     assert not any("尚未產生本系統預報" in str(i.value) for i in app.info)
+
+
+def test_density_page_explains_missing_drag_outlook(tmp_path, monkeypatch):
+    """沒有 45 日預報時，阻力展望要說出是哪個來源、更新狀態為何，且不得讓整頁失敗。"""
+    monkeypatch.setenv("SWX_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SWX_DASHBOARD_INGEST", "off")
+    import streamlit as _st
+
+    _st.cache_data.clear()
+    _st.cache_resource.clear()
+
+    app = AppTest.from_file(APP_PATH, default_timeout=120)
+    app.run()
+    app.sidebar.radio[0].set_value("軌道與密度修正").run()
+    assert not app.exception, [str(e.message) for e in app.exception]
+    text = " ".join(str(i.value) for i in app.info)
+    assert "沒有可用的 SWPC 45 日預報" in text and "swpc_45day_forecast" in text

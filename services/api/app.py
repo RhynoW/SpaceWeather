@@ -428,6 +428,22 @@ def create_app(store: SwxStore | None = None) -> Flask:
             }
         )
 
+    @app.get("/v1/drag/outlook")
+    def drag_outlook():
+        """30 日低軌阻力展望：各高度帶預期高度下降、地磁貢獻、密度模型 ±1σ。"""
+        try:
+            days = int(request.args.get("days", 30))
+            bc = request.args.get("bc")
+            bc = float(bc) if bc is not None else None
+            lat = float(request.args.get("lat", 0.0))
+            lon = float(request.args.get("lon", 0.0))
+            body = products.drag_outlook(store, days=days, bc=bc, lat=lat, lon=lon)
+        except ValueError as exc:
+            return jsonify({"error": {"code": "BAD_REQUEST", "message": str(exc)}}), 400
+        except products.NoForecastData as exc:   # 缺 45 日預報：說清楚是資料問題，不是 500
+            return jsonify({"error": {"code": "NO_DATA", "message": str(exc)}}), 503
+        return jsonify({**body, "data": data_origin()})
+
     @app.errorhandler(Exception)
     def on_error(exc: Exception):
         """未預期例外一律回 500，且**不把內部例外訊息送出**。

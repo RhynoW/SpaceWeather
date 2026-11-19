@@ -29,6 +29,7 @@ from swx_core.flare import flux_to_class, r_scale
 from swx_core.schema import OBSERVED_TYPES
 
 from services.exporter import drag_correction, stk_spaceweather
+from services.exporter import drag_outlook as _drag_outlook
 from services.risk_engine.engine import Episode, Rule, RiskEngine, load_rules
 from services.risk_engine.eventcard import EventStore, build_event_cards
 
@@ -38,7 +39,7 @@ __all__ = [
     "ForecastView", "forecast_view", "forecast_targets", "rsg_status",
     "forecast_snapshot_dir", "forecast_snapshot_view",
     "stk_cssi_frame", "stk_cssi_text", "stk_cssi_summary", "STK_MODE_SOURCE",
-    "drag_correction_table", "drag_correction_metadata",
+    "drag_correction_table", "drag_correction_metadata", "drag_outlook", "NoForecastData",
 ]
 
 STK_MODE_SOURCE = stk_spaceweather.MODE_SOURCE
@@ -394,3 +395,21 @@ def drag_correction_table(store: SwxStore, *, start: datetime | None = None,
 
 def drag_correction_metadata() -> dict:
     return drag_correction.product_metadata()
+
+
+#: 彈道係數的合理範圍（m²/kg）：密實大型平臺約 0.003，立方衛星／大帆板約 0.03
+BC_RANGE = (0.001, 0.05)
+NoForecastData = _drag_outlook.NoForecastData
+
+
+def drag_outlook(store: SwxStore, *, days: int = _drag_outlook.DEFAULT_DAYS,
+                 bc: float | None = None, lat: float = 0.0, lon: float = 0.0,
+                 now: datetime | None = None) -> dict:
+    """30 日低軌阻力展望（SWPC 45 日預報驅動）。範圍檢查在此，API 與儀表板共用。"""
+    if not 1 <= int(days) <= 45:
+        raise ValueError("days 須在 1–45（SWPC 45 日預報的範圍）")
+    if bc is not None and not BC_RANGE[0] <= float(bc) <= BC_RANGE[1]:
+        raise ValueError(f"bc 須在 {BC_RANGE[0]}–{BC_RANGE[1]} m²/kg")
+    if not (-90 <= lat <= 90 and -180 <= lon <= 360):
+        raise ValueError("lat／lon 超出範圍")
+    return _drag_outlook.build(store, now=now, days=int(days), bc=bc, lat=lat, lon=lon)

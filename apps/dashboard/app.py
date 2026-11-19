@@ -654,6 +654,81 @@ def _pct(p) -> str:
     return "—" if p is None else f"{p * 100:.0f}%"
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def load_drag_outlook(bc: float) -> dict:
+    return products.drag_outlook(get_store(), bc=bc)
+
+
+_BC_CHOICES = {"compact": "密實大型平臺 0.005", "typical": "一般遙測衛星 0.012",
+               "high_area": "立方衛星／大帆板 0.022"}
+
+
+def render_drag_outlook() -> None:
+    """30 日低軌阻力展望（國際對標：KSWC／NICT 的 LEO 阻力產品）。"""
+    from orbit_drag import BC_REFERENCE
+
+    st.subheader("未來 30 天低軌阻力展望")
+    kind = st.radio("彈道係數 B＝Cd·A/m（m²/kg）", list(_BC_CHOICES), index=1,
+                    horizontal=True, format_func=_BC_CHOICES.get, key="drag_outlook_bc",
+                    help="高度下降與 B 近乎成正比——同一場太空天氣，B 差三倍，掉的高度就差三倍。")
+    try:
+        with st.spinner("以 SWPC 45 日預報積分 30 天軌道衰減…"):
+            out = load_drag_outlook(BC_REFERENCE[kind])
+    except products.NoForecastData:
+        code, msg = source_refresh_note("swpc_45day_forecast")
+        st.info(f"**沒有可用的 SWPC 45 日預報，無法產生展望。** "
+                f"`swpc_45day_forecast` 最近一次更新：**{code}** — {msg}")
+        return
+
+    meta, summ = out["metadata"], out["summary"]
+    cols = st.columns(len(summ))
+    for c, s in zip(cols, summ):
+        share = "—" if s["geomag_share"] is None else f"{s['geomag_share']:.0%}"
+        c.metric(f"{s['alt0_km']:.0f} km：30 天高度下降",
+                 f"{s['alt_loss_km']:.1f} km",
+                 f"±1σ {s['alt_loss_low_km']:.1f}–{s['alt_loss_high_km']:.1f} km",
+                 delta_color="off")
+        c.caption(f"其中地磁活動貢獻約 **{share}**；寧靜基準 {s['alt_loss_quiet_km']:.1f} km")
+
+    daily = pd.DataFrame(out["daily"])
+    daily["高度帶"] = daily["alt0_km"].map(lambda a: f"{a:.0f} km")
+    # 三格小圖、y 軸各自獨立：350 km 的下降是 550 km 的約 30 倍，共用一軸時
+    # 450／550 km（Starlink 與多數遙測衛星所在）會被壓成貼底的直線。
+    fig = px.line(daily, x="date_utc", y="cum_drop_km", color="高度帶", facet_col="高度帶",
+                  labels={"date_utc": "", "cum_drop_km": "累計高度下降（km）"})
+    fig.update_yaxes(matches=None, showticklabels=True, rangemode="tozero")
+    fig.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
+    fig.update_traces(line=dict(width=2))
+    fig.update_layout(height=280, margin=dict(l=0, r=0, t=30, b=0), showlegend=False)
+    st.plotly_chart(fig, width='stretch')
+
+    drv = pd.DataFrame(out["drivers"])
+    drv["狀態"] = drv["active"].map({True: f"Ap ≥ {meta['active_ap_threshold']:g}（較活躍）",
+                                    False: "平常"})
+    figb = px.bar(drv, x="date_utc", y="ap", color="狀態",
+                  color_discrete_map={f"Ap ≥ {meta['active_ap_threshold']:g}（較活躍）": "#d84315",
+                                      "平常": "#78909c"},
+                  hover_data={"f107": True},
+                  labels={"date_utc": "日期（UTC）", "ap": "預報日 Ap", "f107": "預報 F10.7"})
+    figb.update_layout(height=200, margin=dict(l=0, r=0, t=10, b=0), legend_title="",
+                       bargap=0.15)
+    st.plotly_chart(figb, width='stretch')
+
+    st.warning(
+        "**這不是地磁暴預報。** 驅動量是 NOAA SWPC 45 日預報；本系統預報擂台實測，"
+        "它的 Ap 在 3 天以後與氣候平均同一量級。所以這張表給的是"
+        "「依目前太陽活動水準，平常會掉多少」，不會預先告訴你哪天有 G3——"
+        "那要看值勤頁的 3 日展望與即時監測。±1σ 只含密度模型誤差"
+        + ("（福衛七號實測校準）" if meta["uncertainty_calibrated_by_observation"] else "（未經實測校準）")
+        + "，不含驅動量預報誤差；後者見本頁下方的沿跡差分析。"
+    )
+    st.caption(
+        f"SWPC 45 日預報取得於 {pd.Timestamp(meta['issued_utc']):%Y-%m-%d %H:%M} UTC。"
+        "MSIS 2.1（日均 Ap 模式）＋近圓軌道能量法；密度取樣點固定於 (0°, 0°)，"
+        "暴時比值隨地點可差約 15%。API：`GET /v1/drag/outlook?bc=…&days=…`"
+    )
+
+
 _RSG_SOURCES = ("swpc_xray", "swpc_protons", "swpc_kp_estimated", "swpc_3day_forecast")
 
 
@@ -1730,6 +1805,10 @@ elif page == "地磁基準場":
 elif page == "軌道與密度修正":
     st.title("軌道預報風險與密度修正因子")
     st.caption("議題四產品：地磁擾動 → 熱氣層密度上升 → 大氣阻力增加 → 軌道預報誤差")
+
+    render_drag_outlook()
+    st.divider()
+    st.subheader("事件期間的密度修正因子")
 
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=lookback)
