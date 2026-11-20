@@ -78,6 +78,32 @@ def _records(df: pd.DataFrame) -> list[dict[str, Any]]:
     return out.where(pd.notna(out), None).to_dict(orient="records")
 
 
+FORMATS = ("json", "csv")
+
+
+def _format() -> str | None:
+    """`?format=` 的值；不認得時回 None（呼叫端回 400，不默默給 JSON）。"""
+    fmt = (request.args.get("format") or "json").lower()
+    return fmt if fmt in FORMATS else None
+
+
+def _bad_format():
+    return jsonify({"error": {"code": "BAD_REQUEST",
+                              "message": f"format 須為 {'／'.join(FORMATS)}"}}), 400
+
+
+def _csv(df: pd.DataFrame, filename: str, *, headers: dict | None = None):
+    """CSV 回應。中繼資料不進 CSV 本體（見 products.to_csv），必要的告誡走標頭。"""
+    from flask import Response
+
+    resp = Response(products.to_csv(df), mimetype="text/csv")
+    resp.headers["Content-Type"] = products.CSV_MEDIA_TYPE
+    resp.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    for k, v in (headers or {}).items():
+        resp.headers[k] = v
+    return resp
+
+
 #: 本系統預報一律附帶的作業性告誡。只寫在文件裡不夠——呼叫端讀的是 JSON。
 FORECAST_ADVISORY = {
     "code": "RESEARCH_GRADE_FORECAST",
@@ -190,6 +216,9 @@ def create_app(store: SwxStore | None = None) -> Flask:
     # ── 觀測與回放 ──────────────────────────────────────────────────────
     @app.get("/v1/obs")
     def obs():
+        fmt = _format()
+        if fmt is None:
+            return _bad_format()
         param = request.args.get("param")
         if not param:
             return jsonify({"error": "缺少 param 參數"}), 400
@@ -208,6 +237,15 @@ def create_app(store: SwxStore | None = None) -> Flask:
         # 若一併取 max()，齡期會變成負值，`degraded` 的判斷式
         # （age > 5×cadence）就永遠為假——只要有任何預報列存在，
         # 過期的觀測通道就再也不會被標記為劣化，而那正是 degraded 的唯一用途。
+        if fmt == "csv":
+            cols = ["valid_time", "param_code", "value", "unit", "data_type", "source_id",
+                    "quality_flag", "confidence", "ingest_time"]
+            table = df.reindex(columns=cols) if not df.empty else pd.DataFrame(columns=cols)
+            # 觀測與預報同表時，data_type／source_id 欄讓兩者分得開；
+            # 含本系統預報時，作業性告誡改走標頭（CSV 本體不放中繼資料）
+            extra = ({"X-SWX-Advisory": FORECAST_ADVISORY["code"]}
+                     if not df.empty and (df["source_id"] == "swx_forecast").any() else None)
+            return _csv(table, f"{param}.csv", headers=extra)
         obs = df[df["data_type"].isin(OBSERVED_TYPES)] if not df.empty else df
         latest = obs["valid_time"].max() if not obs.empty else None
         age = _age_seconds(latest)
@@ -395,8 +433,13 @@ def create_app(store: SwxStore | None = None) -> Flask:
     # ── 太陽閃焰 ────────────────────────────────────────────────────────
     @app.get("/v1/flares")
     def flares():
+        fmt = _format()
+        if fmt is None:
+            return _bad_format()
         out = products.flare_list(store, start=_ts(request.args.get("from")),
                                   end=_ts(request.args.get("to")))
+        if fmt == "csv":
+            return _csv(pd.DataFrame(out), "flares.csv")
         return jsonify({"count": len(out), "flares": out})
 
     # ── 匯出 ────────────────────────────────────────────────────────────
@@ -412,12 +455,17 @@ def create_app(store: SwxStore | None = None) -> Flask:
 
     @app.get("/v1/exports/drag-correction")
     def export_drag():
+        fmt = _format()
+        if fmt is None:
+            return _bad_format()
         df = products.drag_correction_table(
             store,
             start=_ts(request.args.get("from")),
             end=_ts(request.args.get("to")),
             as_of=_ts(request.args.get("as_of")),
         )
+        if fmt == "csv":
+            return _csv(df, "drag_correction.csv")
         return jsonify(
             {
                 # 與 services.exporter.drag_correction.export() 的 metadata 同義，
@@ -431,6 +479,9 @@ def create_app(store: SwxStore | None = None) -> Flask:
     @app.get("/v1/drag/outlook")
     def drag_outlook():
         """30 日低軌阻力展望：各高度帶預期高度下降、地磁貢獻、密度模型 ±1σ。"""
+        fmt = _format()
+        if fmt is None:
+            return _bad_format()
         try:
             days = int(request.args.get("days", 30))
             bc = request.args.get("bc")
@@ -442,7 +493,24 @@ def create_app(store: SwxStore | None = None) -> Flask:
             return jsonify({"error": {"code": "BAD_REQUEST", "message": str(exc)}}), 400
         except products.NoForecastData as exc:   # 缺 45 日預報：說清楚是資料問題，不是 500
             return jsonify({"error": {"code": "NO_DATA", "message": str(exc)}}), 503
+        if fmt == "csv":
+            return _csv(products.drag_outlook_table(body), "drag_outlook.csv")
         return jsonify({**body, "data": data_origin()})
+
+    @app.get("/v1/aurora/boundary")
+    def aurora_boundary():
+        """OVATION 極光橢圓赤道側邊界（GeoJSON，可直接疊進 GIS）。"""
+        try:
+            fc = products.aurora_boundary(
+                store, threshold=float(request.args.get("threshold", 10.0)))
+        except ValueError as exc:
+            return jsonify({"error": {"code": "BAD_REQUEST", "message": str(exc)}}), 400
+        except products.NoAuroraData as exc:
+            return jsonify({"error": {"code": "NO_DATA", "message": str(exc)}}), 503
+        fc["properties"]["data"] = data_origin()
+        resp = jsonify(fc)
+        resp.headers["Content-Type"] = "application/geo+json"
+        return resp
 
     @app.errorhandler(Exception)
     def on_error(exc: Exception):

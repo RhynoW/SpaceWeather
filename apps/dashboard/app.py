@@ -28,6 +28,38 @@ import plotly.express as px  # noqa: E402
 import plotly.graph_objects as go  # noqa: E402
 import streamlit as st  # noqa: E402
 
+import module_freshness  # noqa: E402
+
+
+def _env_from_secrets(*names: str) -> None:
+    """Streamlit Cloud 的設定介面是 Secrets，不是環境變數；程式只讀環境變數。
+
+    環境變數已設者優先；否則自 st.secrets 帶入。沒有 secrets 檔時什麼都不做
+    （load_if_toml_exists 不會在畫面上報錯）。雲端常用：
+    SWX_DISABLE_SOURCES = "nlsc_egnss_i95"——國土測繪中心只放行國內 IP，
+    雲端每輪更新會白等三次 30 秒逾時，首批訪客因此多等一分半才看到新資料。
+    """
+    import os
+
+    try:
+        if not st.secrets.load_if_toml_exists():
+            return
+        for name in names:
+            if name not in os.environ and name in st.secrets:
+                os.environ[name] = str(st.secrets[name])
+    except Exception:  # noqa: BLE001 — secrets 格式錯誤不該讓整個站台起不來
+        pass
+
+
+_env_from_secrets("SWX_DISABLE_SOURCES", "SWX_DASHBOARD_INGEST")
+
+# 部署更新後丟掉過期的專案模組，否則新版 app.py 會呼叫舊模組沒有的函式
+# 而整頁拋 AttributeError（見 module_freshness 說明）。快取裡的物件也是舊類別
+# 產生的，一併清掉。
+if module_freshness.drop_stale():
+    st.cache_data.clear()
+    st.cache_resource.clear()
+
 import services  # noqa: E402,F401
 from services import products  # noqa: E402  產品層：與 API 共用同一條呼叫路徑
 from swx_core import (  # noqa: E402
@@ -35,7 +67,34 @@ from swx_core import (  # noqa: E402
 )
 from swx_core.flare import flux_to_class, r_scale  # noqa: E402
 
+module_freshness.record()
+
 st.set_page_config(page_title="SWX-SDA 太空天氣儀表板", page_icon="🛰", layout="wide")
+
+#: 自繪 HTML／地圖用的中性色，依使用者選的白底／黑底切換（見 .streamlit/config.toml）。
+#: 等級色（LEVEL_COLOR、R/S/G 色塊）兩種底色都用同一組：它們搭白字、自帶底色。
+_UI_COLORS = {
+    "dark": {"card": "#2b2b2b", "card_muted": "#3a3a3a", "nodata_bg": "#2b2f35",
+             "nodata_fg": "#9E9E9E", "outlook_bg": "#1f2a36", "outlook_fg": "#e0e0e0",
+             "land": "#2a2f36", "ocean": "#11161c", "border": "#555", "coast": "#777",
+             "grid": "#3a414a", "label": "#e0e0e0", "rung_off": "#3a3f47", "rung_fg": "#6b7280",
+             "subtle": "#9aa4b2", "line_n": "#4C9AFF", "line_s": "#2DD4BF"},
+    "light": {"card": "#f3f4f6", "card_muted": "#e5e7eb", "nodata_bg": "#eceff1",
+              "nodata_fg": "#616161", "outlook_bg": "#e3ecf7", "outlook_fg": "#1f2937",
+              "land": "#e8e6e1", "ocean": "#f7fbff", "border": "#9e9e9e", "coast": "#757575",
+              "grid": "#d0d7de", "label": "#1f2937", "rung_off": "#dde1e6", "rung_fg": "#6b7280",
+              "subtle": "#57606a", "line_n": "#1F6FEB", "line_s": "#0F766E"},
+}
+
+
+def ui_colors() -> dict[str, str]:
+    """目前主題的中性色。取不到主題（舊版 Streamlit、測試環境）時用深色。"""
+    try:
+        kind = st.context.theme.type or "dark"
+    except Exception:  # noqa: BLE001
+        kind = "dark"
+    return _UI_COLORS.get(kind, _UI_COLORS["dark"])
+
 
 LEVEL_COLOR = {
     "L0": "#2e7d32", "L1": "#f9a825", "L2": "#ef6c00",
@@ -598,14 +657,15 @@ def render_status_banner(store, *, hours: int = 6) -> None:
         lvl = _banner_level(value, thresholds)
 
         with col:
+            c = ui_colors()
             if lvl < 0:
-                head = "<span style='color:#9E9E9E'>無資料</span>"
+                head = f"<span style='color:{c['nodata_fg']}'>無資料</span>"
             elif lvl == 0:
                 head = "<span style='color:#2E7D32'>平靜</span>"
             else:
                 head = f"<span style='color:{BANNER_COLORS[lvl - 1]}'>{labels[lvl - 1]}</span>"
             st.markdown(
-                f"<div style='font-size:13px;color:#9aa4b2'>{title}"
+                f"<div style='font-size:13px;color:{c['subtle']}'>{title}"
                 f"<span style='float:right'>{unit}</span></div>"
                 f"<div style='font-size:20px;font-weight:700;margin:2px 0 6px'>{head}</div>",
                 unsafe_allow_html=True,
@@ -614,8 +674,8 @@ def render_status_banner(store, *, hours: int = 6) -> None:
             rungs = []
             for i in range(len(thresholds) - 1, -1, -1):
                 on = lvl >= i + 1
-                bg = BANNER_COLORS[i] if on else ("#3a3f47" if lvl >= 0 else "#2b2f35")
-                fg = "#fff" if on else "#6b7280"
+                bg = BANNER_COLORS[i] if on else (c["rung_off"] if lvl >= 0 else c["nodata_bg"])
+                fg = "#fff" if on else c["rung_fg"]
                 rungs.append(
                     f"<div style='background:{bg};color:{fg};font-size:11px;"
                     f"text-align:center;padding:3px 0;margin-bottom:2px;"
@@ -640,8 +700,9 @@ def _rsg_cell(level: str | None, has_data: bool, note: str = "") -> str:
     from swx_core.scales import scale_rank
 
     if not has_data:
-        return ("<td style='background:#2b2f35;color:#9E9E9E;text-align:center;"
-                "padding:6px'>無資料</td>")
+        c = ui_colors()
+        return (f"<td style='background:{c['nodata_bg']};color:{c['nodata_fg']};"
+                "text-align:center;padding:6px'>無資料</td>")
     rank = scale_rank(level)
     color = _RSG_COLORS[min(rank, 3)]
     label = level or "平靜"
@@ -727,6 +788,68 @@ def render_drag_outlook() -> None:
         "MSIS 2.1（日均 Ap 模式）＋近圓軌道能量法；密度取樣點固定於 (0°, 0°)，"
         "暴時比值隨地點可差約 15%。API：`GET /v1/drag/outlook?bc=…&days=…`"
     )
+    st.download_button("下載展望表 CSV", products.to_csv(products.drag_outlook_table(out)),
+                       file_name="drag_outlook.csv", mime="text/csv", key="csv_drag_outlook",
+                       help="逐日 × 高度帶，附當日預報 F10.7／Ap。方法與告誡在 JSON 版"
+                            "（`/v1/drag/outlook`）。")
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_aurora_boundary() -> dict:
+    return products.aurora_boundary(get_store())
+
+
+def render_aurora_map() -> None:
+    """極光橢圓赤道側邊界地圖＋GeoJSON 下載。
+
+    單一純量只說得出「全球最低到幾度」；邊界在不同經度差很多，
+    高緯 HF 路徑與極區航路要看自己那段經度。
+    """
+    import json
+
+    try:
+        fc = load_aurora_boundary()
+    except products.NoAuroraData:
+        code, msg = source_refresh_note("swpc_ovation")
+        st.info(f"沒有 OVATION 原始檔，無法繪製邊界。`swpc_ovation` 最近一次更新：**{code}** — {msg}")
+        return
+    names = {"north": "北半球邊界", "south": "南半球邊界"}
+    fig = go.Figure()
+    for feat in fc["features"]:
+        geom = feat["geometry"]
+        if not geom:
+            continue
+        lons, lats = [], []
+        for seg in geom["coordinates"]:             # 分段之間插 None，斷線而不連線
+            lons += [p[0] for p in seg] + [None]
+            lats += [p[1] for p in seg] + [None]
+        hemi = feat["properties"]["hemisphere"]
+        # 線色依底色指定：預設色盤的第二色在白底海面上幾乎看不見
+        fig.add_scattergeo(lon=lons, lat=lats, mode="lines", name=names[hemi],
+                           line=dict(width=2, color=ui_colors()["line_n" if hemi == "north"
+                                                                 else "line_s"]))
+    fig.add_scattergeo(lon=[121.0], lat=[23.5], mode="markers+text", text=["臺灣"],
+                       textposition="middle right", textfont=dict(color=ui_colors()["label"]),
+                       marker=dict(size=8, color="#d84315"), name="臺灣（參照）")
+    # 緯度格線只留 30° 一條、壓暗：它是讀邊界緯度的尺，不該搶過資料線
+    c = ui_colors()
+    fig.update_geos(projection_type="natural earth", showcountries=True,
+                    showland=True, landcolor=c["land"], oceancolor=c["ocean"], showocean=True,
+                    countrycolor=c["border"], coastlinecolor=c["coast"], bgcolor="rgba(0,0,0,0)",
+                    lataxis=dict(showgrid=True, dtick=30, gridcolor=c["grid"], gridwidth=0.5))
+    fig.update_layout(height=360, margin=dict(l=0, r=0, t=10, b=0),
+                      paper_bgcolor="rgba(0,0,0,0)", legend=dict(orientation="h"))
+    st.plotly_chart(fig, width='stretch')
+    p = fc["properties"]
+    st.caption(
+        f"NOAA SWPC OVATION 預報時刻 {p.get('forecast_time') or '—'}（30–90 分鐘預報，模式輸出、非觀測）。"
+        f"逐經度取極光機率 ≥ {fc['features'][0]['properties']['threshold_percent']:g}% 的最靠赤道格點；"
+        "無格點達門檻的經度留白，不插值補線。"
+    )
+    st.download_button("下載邊界 GeoJSON", json.dumps(fc, ensure_ascii=False),
+                       file_name="aurora_boundary.geojson", mime="application/geo+json",
+                       key="geojson_aurora",
+                       help="可直接疊進 QGIS／Cesium 等 GIS 平臺。API：`/v1/aurora/boundary`")
 
 
 _RSG_SOURCES = ("swpc_xray", "swpc_protons", "swpc_kp_estimated", "swpc_3day_forecast")
@@ -763,8 +886,12 @@ def render_rsg_panel() -> None:
         st.warning(f"R/S/G 狀態載入失敗：{type(exc).__name__}")
         return
     days = [d["date_utc"][5:] for d in rsg["outlook"]]
+    c = ui_colors()
+    out_td = (f"<td style='background:{c['outlook_bg']};color:{c['outlook_fg']};"
+              "text-align:center;padding:6px'>")
+    nodata = f"<span style='color:{c['nodata_fg']}'>無資料</span>"
     head = ("<tr><th></th><th>過去 48–24h</th><th>過去 24h</th><th>現在</th>"
-            + "".join(f"<th style='background:#1f2a36'>{d} 展望</th>" for d in days) + "</tr>")
+            + "".join(f"<th style='background:{c['outlook_bg']};color:{c['outlook_fg']}'>{d} 展望</th>" for d in days) + "</tr>")
     rows = []
     for key in ("R", "S", "G"):
         ob = rsg["observed"][key]
@@ -779,15 +906,12 @@ def render_rsg_panel() -> None:
                 r = d["R"]
                 has = r["r1_r2_prob"] is not None
                 cells.append(
-                    "<td style='background:#1f2a36;color:#e0e0e0;text-align:center;padding:6px'>"
+                    out_td
                     + (f"R1–R2 {_pct(r['r1_r2_prob'])}<br>R3+ {_pct(r['r3_plus_prob'])}"
-                       if has else "<span style='color:#9E9E9E'>無資料</span>") + "</td>")
+                       if has else nodata) + "</td>")
             else:
                 p = d["S"]["s1_plus_prob"]
-                cells.append(
-                    "<td style='background:#1f2a36;color:#e0e0e0;text-align:center;padding:6px'>"
-                    + (f"S1+ {_pct(p)}" if p is not None
-                       else "<span style='color:#9E9E9E'>無資料</span>") + "</td>")
+                cells.append(out_td + (f"S1+ {_pct(p)}" if p is not None else nodata) + "</td>")
         rows.append(f"<tr><th style='text-align:left;padding:6px'>{_RSG_NAMES[key]}</th>"
                     + "".join(cells) + "</tr>")
     st.markdown(
@@ -849,6 +973,10 @@ page = st.sidebar.radio("頁面", PAGES, key="nav_page")
 if PAGE_SLUGS[page] != _want:
     st.query_params["page"] = PAGE_SLUGS[page]
 lookback = st.sidebar.slider("回顧天數", 1, 60, 7)
+st.sidebar.caption(
+    "🎨 **白底／黑底**：右上角 **⋮ → Settings** 選 Light（白底）或 Dark（黑底）。"
+    "選擇只記在這台瀏覽器；未選時跟隨作業系統。"
+)
 st.sidebar.divider()
 autostart_refresh()
 refresh_status_line()
@@ -903,7 +1031,7 @@ if page == "值勤模式":
                 no_criteria = int(row.get("criteria_total", 0) or 0) == 0
                 headline = "尚無判據" if no_criteria else "無資料"
                 st.markdown(
-                    f"<div style='padding:14px;border-radius:8px;background:#3a3a3a;"
+                    f"<div style='padding:14px;border-radius:8px;background:{ui_colors()['card_muted']};"
                     f"border-left:6px solid #888'><b>{row['domain']}</b><br>"
                     f"<span style='font-size:2em'>{headline}</span><br>"
                     f"<small>不代表無風險</small></div>",
@@ -917,7 +1045,7 @@ if page == "值勤模式":
                     if cov else ""
                 )
                 st.markdown(
-                    f"<div style='padding:14px;border-radius:8px;background:#2b2b2b;"
+                    f"<div style='padding:14px;border-radius:8px;background:{ui_colors()['card']};"
                     f"border-left:6px solid {color}'><b>{row['domain']}</b><br>"
                     f"<span style='font-size:2em;color:{color}'>{lvl}</span>"
                     f"<br><small>{row.get('active_rules', '—')} {INFER_NOTE.get(infer, '')}</small>"
@@ -1144,6 +1272,12 @@ elif page == "參數時序":
             f"{len(df)} 列｜來源 {', '.join(sorted(df['source_id'].dropna().unique()))}"
             f"｜品質 {dict(df['quality_flag'].value_counts())}"
         )
+        cols = ["valid_time", "param_code", "value", "unit", "data_type", "source_id",
+                "quality_flag", "confidence", "ingest_time"]
+        st.download_button(f"下載 {param}.csv", products.to_csv(df.reindex(columns=cols)),
+                           file_name=f"{param}.csv", mime="text/csv", key=f"csv_{param}",
+                           help="畫面上這段資料（含回放設定）。data_type／source_id 欄區分觀測與預報。"
+                                "API：`/v1/obs?param=…&format=csv`")
 
 
 # ── 3. 事件卡 ───────────────────────────────────────────────────────────
@@ -1563,7 +1697,7 @@ elif page == "RTK 現場查核":
             border = "border:2px dashed #888;" if illustrative else ""
             with col:
                 st.markdown(
-                    f"<div style='padding:14px;border-radius:8px;background:#2b2b2b;{border}"
+                    f"<div style='padding:14px;border-radius:8px;background:{ui_colors()['card']};{border}"
                     f"border-left:6px solid {color}'>"
                     f"<b>{names.get(row['grid_id'], row['grid_id'])}</b><br>"
                     f"<span style='font-size:2em;color:{color}'>{row['value']:.1f}</span>"
@@ -1799,6 +1933,7 @@ elif page == "地磁基準場":
     if not aurora.empty:
         st.metric("極光橢圓赤道側邊界", f"{aurora.iloc[-1]['value']:.0f}°N",
                   help="邊界越往低緯推進，代表地磁擾動越深入")
+    render_aurora_map()
 
 
 # ── 7. 軌道與密度修正 ───────────────────────────────────────────────────
@@ -2575,3 +2710,6 @@ elif page == "STEM 教學":
 
     render_stem(get_store(), registry, render_image_card, images_by_id,
                 render_animation, animations_by_id)
+
+# 記下本輪各頁延遲 import 的模組（見 module_freshness）
+module_freshness.record()

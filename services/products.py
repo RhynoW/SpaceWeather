@@ -29,6 +29,7 @@ from swx_core.flare import flux_to_class, r_scale
 from swx_core.schema import OBSERVED_TYPES
 
 from services.exporter import drag_correction, stk_spaceweather
+from services.exporter import aurora_geojson as _aurora
 from services.exporter import drag_outlook as _drag_outlook
 from services.risk_engine.engine import Episode, Rule, RiskEngine, load_rules
 from services.risk_engine.eventcard import EventStore, build_event_cards
@@ -40,6 +41,7 @@ __all__ = [
     "forecast_snapshot_dir", "forecast_snapshot_view",
     "stk_cssi_frame", "stk_cssi_text", "stk_cssi_summary", "STK_MODE_SOURCE",
     "drag_correction_table", "drag_correction_metadata", "drag_outlook", "NoForecastData",
+    "drag_outlook_table", "aurora_boundary", "NoAuroraData", "to_csv", "CSV_MEDIA_TYPE",
 ]
 
 STK_MODE_SOURCE = stk_spaceweather.MODE_SOURCE
@@ -324,10 +326,14 @@ def rsg_status(store: SwxStore, *, now: datetime | pd.Timestamp | None = None) -
     day0 = now.floor("D")
     probs_all = store.query(["R12_PROB", "R3_PROB", "S1_PROB"], source_id="swpc_3day_forecast",
                             start=day0, end=day0 + timedelta(days=4))
+    # 不能用「入庫時間最新的那批列」判定最新一份：寫入去重只寫數值有變的列，
+    # 新一份預報入庫時常只有新增的第三天被寫入，那批列的最早日期就成了第三天
+    # （實測長時間運作的站台顯示 11-22～11-24、後兩天無資料）。改用涵蓋到的
+    # 最後一天回推兩天——最新一份一定帶來最遠的那一天，且不受去重影響。
     first = day0
     if not probs_all.empty:
-        newest = probs_all[probs_all["ingest_time"] == probs_all["ingest_time"].max()]
-        first = pd.Timestamp(newest["valid_time"].min()).floor("D")
+        last = pd.Timestamp(probs_all["valid_time"].max()).floor("D")
+        first = max(day0, last - timedelta(days=2))
     days = [first + timedelta(days=i) for i in range(3)]
     probs = probs_all[(probs_all["valid_time"] >= first)
                       & (probs_all["valid_time"] < first + timedelta(days=3))] \
@@ -413,3 +419,46 @@ def drag_outlook(store: SwxStore, *, days: int = _drag_outlook.DEFAULT_DAYS,
     if not (-90 <= lat <= 90 and -180 <= lon <= 360):
         raise ValueError("lat／lon 超出範圍")
     return _drag_outlook.build(store, now=now, days=int(days), bc=bc, lat=lat, lon=lon)
+
+
+def drag_outlook_table(outlook: dict) -> pd.DataFrame:
+    """把阻力展望攤平成一張表（CSV 用）：逐日 × 高度帶，附當日預報驅動量。"""
+    daily = pd.DataFrame(outlook["daily"])
+    drv = pd.DataFrame(outlook["drivers"]).rename(
+        columns={"f107": "f107_forecast", "ap": "ap_forecast", "active": "ap_active"})
+    out = daily.merge(drv, on="date_utc", how="left")
+    meta = outlook["metadata"]
+    out["ballistic_coefficient_m2_kg"] = meta["ballistic_coefficient_m2_kg"]
+    out["forecast_issued_utc"] = meta["issued_utc"]
+    return out
+
+
+# ── 極光橢圓邊界（GeoJSON）───────────────────────────────────────────────
+NoAuroraData = _aurora.NoAuroraData
+
+
+def aurora_boundary(store: SwxStore, *, threshold: float = _aurora.DEFAULT_THRESHOLD) -> dict:
+    """OVATION 極光橢圓赤道側邊界，GeoJSON FeatureCollection。"""
+    if not 1 <= float(threshold) <= 90:
+        raise ValueError("threshold 須在 1–90（%）")
+    return _aurora.build(store.raw_root, threshold=float(threshold))
+
+
+# ── CSV ─────────────────────────────────────────────────────────────────
+CSV_MEDIA_TYPE = "text/csv; charset=utf-8"
+
+
+def to_csv(df: pd.DataFrame) -> str:
+    """API 與儀表板共用的 CSV 序列化。
+
+    · 帶 BOM：國內使用者多以 Excel 開啟，沒有 BOM 中文欄位會變亂碼。
+    · 時間一律 ISO 8601 UTC（…Z）：Excel 的在地時間格式會讓跨時區合併出錯。
+    · 只是表格本身；方法、基準與告誡等中繼資料在 JSON 版——CSV 加註解行
+      會讓多數讀取器解析失敗。
+    """
+    out = df.copy()
+    for col in out.columns:
+        if pd.api.types.is_datetime64_any_dtype(out[col]):
+            ts = out[col].dt.tz_convert("UTC") if out[col].dt.tz is not None else out[col]
+            out[col] = ts.dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return "\ufeff" + out.to_csv(index=False, lineterminator="\n")

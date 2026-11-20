@@ -827,8 +827,16 @@ python tools/media_smoke.py --all            # 設定檔內全部 22 項
 
 ## API
 
-18 個端點：17 個唯讀（無狀態、可快取）＋1 個需授權的事件卡人工發布（預設關閉）。
+19 個端點：18 個唯讀（無狀態、可快取）＋1 個需授權的事件卡人工發布（預設關閉）。
 端點集合由 `tests/test_api_contract.py` 守住——新增端點而未同步本節，測試會紅燈。
+
+**CSV 與 GeoJSON**：`/v1/obs`、`/v1/flares`、`/v1/exports/drag-correction`、`/v1/drag/outlook`
+接受 `format=csv`（不認得的值回 400，不默默給 JSON）。CSV 帶 BOM（國內多以 Excel 開啟）、
+時間一律 ISO 8601 UTC，並保留 `data_type`／`source_id`，觀測與預報在表格裡仍分得開；
+含本系統預報時以 `X-SWX-Advisory` 標頭附作業性告誡。CSV 只是表格本身，
+方法、基準與告誡等中繼資料在 JSON 版。空間產品目前只有極光橢圓邊界（`/v1/aurora/boundary`，GeoJSON）：
+可公開的格點資料僅此一項——TEC、S4、I95 等在地格網尚待授權，不做沒有資料支撐的圖層。
+儀表板「參數時序」「軌道與密度修正」「地磁基準場」頁各有對應的下載鈕。
 
 **回應語意**（以下為目前實際行為，非規劃）：
 
@@ -952,6 +960,7 @@ S4 有了、ROTI 仍無來源，故為 `partial`——規則會在 S4 超標時�
 | `GET /v1/flares` | 太陽閃焰事件（含分級與 NOAA R 級） |
 | `GET /v1/exports/stk/spaceweather.txt` | STK/GMAT CSSI 驅動檔 |
 | `GET /v1/exports/drag-correction` | 密度修正因子 |
+| `GET /v1/aurora/boundary` | OVATION 極光橢圓赤道側邊界，**GeoJSON**（`application/geo+json`，南北半球各一個 MultiLineString；`threshold` 1–90%，預設 10；逐經度取最靠赤道格點、缺口不插值；30–90 分鐘模式預報、非觀測） |
 | `GET /v1/drag/outlook` | 30 日低軌阻力展望：各高度帶預期高度下降、地磁貢獻、密度模型 ±1σ（`days` 1–45、`bc` 0.001–0.05 m²/kg、`lat`／`lon`；缺 45 日預報回 503） |
 
 ---
@@ -1068,9 +1077,28 @@ python tools/make_forecast_snapshot.py                     # 整個重建；觀�
 | Main file path | `apps/dashboard/app.py` |
 | 部署網址 | <https://spaceweather.streamlit.app/> |
 
-**不需要設定任何 secrets。** 環境變數只有一個選用項：
-`SWX_DISABLE_SOURCES`（逗號分隔的 `source_id`）可在**單一站台**關掉個別來源，
-不必改 `configs/sources.yaml`——後者會連排程主機與本機開發環境一起關掉。
+**不需要任何憑證類 secrets。** 選用設定只有 `SWX_DISABLE_SOURCES`（逗號分隔的 `source_id`），
+可在**單一站台**關掉個別來源，不必改 `configs/sources.yaml`——後者會連排程主機與本機開發環境一起關掉。
+環境變數或 Streamlit Cloud 的 **Settings → Secrets** 皆可（後者由 app 啟動時帶入環境變數，環境變數優先）。
+
+**建議雲端站台設定**（Secrets）：
+
+```toml
+SWX_DISABLE_SOURCES = "nlsc_egnss_i95"
+```
+
+國土測繪中心只放行國內來源位址，雲端每輪更新都會白等三次 30 秒連線逾時；
+而各頁快取要整輪更新結束才清除，開站後首批訪客因此多等約一分半才看到新資料。
+
+**白底／黑底由使用者自選。** `.streamlit/config.toml` 同時定義 `[theme.light]` 與 `[theme.dark]`，
+右上角 **⋮ → Settings** 即可切換，選擇只記在該瀏覽器、未選時跟隨作業系統。
+Streamlit 沒有讓程式切換主題的 API，以 CSS 硬蓋會讓表格等 canvas 元件仍是黑底，故採官方作法；
+自繪的卡片、R/S/G 表、極光地圖顏色由 `app.py` 的 `ui_colors()` 依 `st.context.theme.type` 取用。
+
+**推送後不必再手動 Reboot。** Streamlit Cloud 推送後只重跑 `app.py`、不重載已 import 的模組，
+新版 app.py 一呼叫舊模組沒有的函式就整頁 `AttributeError`（實際發生過，且雲端行程曾數月未重啟、
+資料健康頁停在 8 月的快照）。`apps/dashboard/module_freshness.py` 每輪比對專案模組的檔案時間，
+有變更就整批重新載入並清快取（`tests/test_module_freshness.py`）。
 
 雲端是全新 clone、`data/` 沒有觀測分區，此時 `swx_core.config.data_dir()`
 會自動退回 `data/demo/` 的示範快照（含 449 個 Parquet 分區、36 個參數），

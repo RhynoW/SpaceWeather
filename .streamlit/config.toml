@@ -1,7 +1,16 @@
 # Streamlit Cloud 與本機共用設定
+# 白底／黑底由使用者自選：同時定義 light 與 dark 兩套，右上角 ⋮ → Settings 即可切換，
+# 選擇記在各自瀏覽器、不影響其他人；未選時跟隨作業系統設定。
+# （Streamlit 沒有讓程式切換主題的 API；以 CSS 硬蓋會讓表格等 canvas 元件仍是黑底。）
+# 自繪的 HTML／地圖顏色由 app.py 的 ui_colors() 依 st.context.theme.type 取用。
 [theme]
-base = "dark"
 primaryColor = "#4C9AFF"
+
+[theme.dark]
+primaryColor = "#4C9AFF"
+
+[theme.light]
+primaryColor = "#1F6FEB"     # 白底上 #4C9AFF 對比不足，改用較深的藍
 
 [server]
 headless = true

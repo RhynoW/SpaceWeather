@@ -253,6 +253,39 @@ def test_rsg_outlook_follows_newest_product_after_2200_issue(rsg_store):
     assert out[0]["R"] == {"r1_r2_prob": 0.25, "r3_plus_prob": 0.05}, "應取新一份的第一天"
     assert out[2]["S"] == {"s1_plus_prob": 0.01}
 
+
+def test_rsg_outlook_survives_write_dedupe(rsg_store):
+    """新一份預報只有第三天的數值有變時，去重只寫入那一列；展望仍須是新一份的三天。
+
+    長時間運作的站台實測：舊判定取「入庫時間最新的那批列」，結果顯示
+    11-22～11-24、後兩天無資料（clone 只抓一次，所有列同批寫入，看不出來）。
+    """
+    # 20、21 日與舊預報同值（去重會略過），只有 22 日是新的
+    newer = b""":Product: 3-Day Forecast
+:Issued: 2026 Nov 19 2200 UTC
+B. NOAA Solar Radiation Activity Observation and Forecast
+
+Solar Radiation Storm Forecast for Nov 20-Nov 22 2026
+
+              Nov 20  Nov 21  Nov 22
+S1 or greater    1%      1%     10%
+
+C. NOAA Radio Blackout Activity and Forecast
+
+Radio Blackout Forecast for Nov 20-Nov 22 2026
+
+              Nov 20        Nov 21        Nov 22
+R1-R2           15%           15%           35%
+R3 or greater    5%            5%           10%
+"""
+    late = pd.Timestamp("2026-11-19T22:30Z")
+    probs = build(catalog()["swpc_3day_forecast"], rsg_store).parse(newer)
+    res = rsg_store.write(probs, ingest_time=late.to_pydatetime())      # 預設去重
+    assert res.rows_written == 3, "前提：去重只寫入 22 日的三列"
+    out = products.rsg_status(rsg_store, now=late)["outlook"]
+    assert [d["date_utc"] for d in out] == ["2026-11-20", "2026-11-21", "2026-11-22"]
+    assert all(d["S"]["s1_plus_prob"] is not None for d in out), "三天都要有值"
+
 def test_api_scales_endpoint(rsg_store, monkeypatch):
     monkeypatch.setattr(products.pd.Timestamp, "now",
                         classmethod(lambda cls, tz=None: NOW))

@@ -38,6 +38,7 @@ DOCUMENTED_ENDPOINTS = {
     ("GET", "/v1/exports/stk/spaceweather.txt"),
     ("GET", "/v1/exports/drag-correction"),
     ("GET", "/v1/drag/outlook"),
+    ("GET", "/v1/aurora/boundary"),
 }
 
 

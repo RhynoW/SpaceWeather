@@ -408,6 +408,7 @@ GET  /v1/exports/stk/spaceweather.txt        STK CSSI 驅動檔
 GET  /v1/exports/jb2008/{solfsmy|dtcfile}    JB2008 驅動檔
 GET  /v1/exports/drag-correction?alt=&from=  密度修正因子表
 GET  /v1/drag/outlook?days=&bc=&lat=&lon=   30 日低軌阻力展望
+GET  /v1/aurora/boundary?threshold=         極光橢圓赤道側邊界（GeoJSON）
 GET  /v1/layers/{layer}.geojson              GIS 風險圖層
 GET  /v1/layers/{layer}.czml                 ← 複用既有 CZML 產生器(A14)，Cesium 直接吃
 GET  /v1/stream/alerts                       SSE 即時告警
@@ -712,6 +713,8 @@ SpaceWeather/
 | G14 | **`with_source` 匯出混入 SWPC 預測** | 模式說明為「觀測＋CelesTrak 自帶預測」，實作撈全部來源再去重；同為 tier 1 的 SWPC Kp／F10.7 預報混入預測段，同一列 Kp 與 Ap 對不上（10-30：Kp 2.33 配 Ap 5），STK 讀到自相矛盾的驅動值且不報錯 | 觀測取任何來源（已定稿列驗證一致），預測在去重**前**限定 `celestrak_sw_all` | `test_with_source_takes_predictions_only_from_celestrak` |
 | G15 | **雲端預報頁恆為「尚未產生」**；R/S/G 冷啟動缺陷 | 冷啟動實測（乾淨 clone、只有示範快照 → 背景更新後）：預報模型需多年歷史，雲端只擷取近幾天，永遠無法自行產生預報；示範快照的預報停在 08-25、早已超出查詢窗。另：Hp30 完整序列檔每日更新、實測落後 23 小時，1 小時預報產生當下目標時刻即已過去；R/S/G 展望固定從今天排起、質子／電子短檔使過去時窗不完整、開站更新前整表全空無說明 | 預報快照 `data/demo/forecast_snapshot/`（`tools/make_forecast_snapshot.py`，觀測與官方對照取 as_of＝產生時刻），預報頁無即時預報時退回並標示；新增 `gfz_hp30_nowcast`（GFZ JSON API，落後約 1 小時，tier 2）；展望跟著最新一份預報；GOES 質子、電子改 3 日檔；空表說明原因與各來源狀態 | `tests/test_forecast_snapshot.py`、`test_forecast_page_falls_back_to_labelled_snapshot`、`test_duty_page_explains_empty_rsg_panel`、`test_rsg_outlook_follows_newest_product_after_2200_issue`、`test_gfz_hp30_nowcast_parse_and_url` |
 | G16 | **無前瞻的低軌阻力產品**（國際對標：KSWC、NICT） | 密度頁只有事件期間的修正因子與「驅動量選擇值多少公里」的不確定度分析，沒有「未來 30 天各高度帶預期掉多少」 | `services/exporter/drag_outlook.py`＋`products.drag_outlook`＋`GET /v1/drag/outlook`＋密度頁首區塊：SWPC 45 日預報驅動，MSIS 2.1＋能量法逐 3 小時積分；各高度帶 30 天高度下降、密度模型 ±1σ（實測校準 σ）、地磁貢獻（同 F10.7、Ap=4 基準相減）、預報活躍日。驅動量於去重前限定 `swpc_45day_forecast`；明載「非地磁暴預報」與誤差帶不含驅動量誤差 | `tests/test_drag_outlook.py`（物理方向、B 線性、來源界線、輸入檢查、API 400／503）、`test_density_page_explains_missing_drag_outlook` |
+| G17 | **無 CSV／GeoJSON 輸出**（國際對標：各國服務皆提供 API＋檔案下載＋GIS 圖層） | 所有端點只回 JSON；極光邊界只存全球最低一點的純量，同一時刻北美側與亞洲側可差 10° 以上 | 四個表格型端點接受 `format=csv`（BOM、ISO UTC、保留 data_type／source_id，告誡走 `X-SWX-Advisory` 標頭；未知格式回 400）；`GET /v1/aurora/boundary` 由 OVATION 原始格網逐經度萃取赤道側邊界，GeoJSON MultiLineString，缺口斷線不插值；儀表板三頁加下載鈕、地磁基準場頁加邊界地圖。事件卡不做 GeoJSON：專案無區域幾何定義，不自行虛構多邊形 | `tests/test_exports.py` |
+| G18 | **雲端推送後整頁 AttributeError**；雲端行程數月未重啟 | Streamlit Cloud 推送後只重跑 app.py、不重載已 import 的模組：短時預報頁 `products.forecast_snapshot_view`、密度頁 `products.drag_outlook` 皆不存在於舊模組；資料健康頁停在 08-16（2,054 列，即 8 月最初快照），顯示行程與快取自 8 月未更新。另：I95 在雲端（國外 IP）每輪白等 3×30 秒逾時，各頁快取須整輪結束才清除 | `module_freshness`：每輪比對專案模組檔案時間，有變更即整批自 sys.modules 移除並清快取（不逐個 reload，避免新舊版本混雜）；延遲 import 者以「比這一代載入起點新」判定。`SWX_DISABLE_SOURCES` 等可由 Streamlit Secrets 帶入；建議雲端停用 I95 | `tests/test_module_freshness.py`；乾淨 clone 同一行程模擬部署：無修正重現 AttributeError，有修正正常 |
 
 ### 尚未修正（依建議順序）
 

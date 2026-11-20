@@ -25,17 +25,17 @@ IMPORT_TO_PACKAGE = {
 }
 
 # 本專案自有模組與標準庫（不需宣告）
-# 本專案自有模組。`stem` 與 `media_url` 是 apps/dashboard 下的同層模組
+# 本專案自有模組。`stem`、`media_url`、`module_freshness` 是 apps/dashboard 下的同層模組
 # （Streamlit 會把腳本所在目錄放進 sys.path，故可直接 import），
 # 不是 PyPI 套件——漏列會讓相依測試誤報。
 LOCAL = {"swx_core", "services", "geomag", "orbit_drag", "apps", "tools",
-         "stem", "media_url", "__future__"}
+         "stem", "media_url", "module_freshness", "__future__"}
 STDLIB = {
     "abc", "argparse", "ast", "base64", "collections", "contextlib", "copy", "csv",
     "dataclasses", "datetime", "enum", "functools", "glob", "hashlib", "hmac", "importlib",
     "io", "itertools", "json", "logging", "math", "operator", "os", "pathlib",
     "random", "re", "shutil", "socket", "sqlite3", "ssl", "struct", "subprocess",
-    "sys", "tarfile", "tempfile", "textwrap", "threading", "time", "typing",
+    "sys", "tarfile", "tempfile", "textwrap", "threading", "time", "types", "typing",
     "urllib", "uuid",
     "warnings", "zoneinfo",
 }
