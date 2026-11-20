@@ -489,6 +489,48 @@ def test_refresh_result_distinguishes_why_a_source_has_no_data():
     assert RefreshResult(ran=False, reason="資料齡期 5 分鐘").status_of("a")[0] == "not_run"
 
 
+def test_local_fallback_is_not_reported_as_success(tmp_path, monkeypatch):
+    """遠端失敗而讀了本機備援檔：不得算成功，且要說出遠端為何失敗。
+
+    實測：雲端連不到 CelesTrak，每輪都「成功」讀進 8 月的種子檔，
+    F10.7 停在 08-16 三個月，頁面上只看得到「更新 19/20 個來源」。
+    """
+    import requests
+
+    from services.ingest import refresh
+    from services.ingest.run import run_source
+    from swx_core import SwxStore, catalog
+
+    def boom(*a, **k):
+        raise requests.ConnectionError("Connection refused by celestrak.org")
+
+    monkeypatch.setattr(requests.Session, "get", boom)
+    spec = catalog()["celestrak_sw_all"]
+    assert spec.local_path() and spec.local_path().exists(), "前提：此來源有本機備援檔"
+    store = SwxStore(tmp_path)
+    monkeypatch.setattr(refresh, "SwxStore", lambda *_a, **_k: store)
+    from services.ingest import run as _run
+    monkeypatch.setattr(_run, "run_source", lambda sid, _st: run_source(sid, store))
+    from services.ingest import base as _base
+    monkeypatch.setattr(_base.time, "sleep", lambda *_: None)
+
+    r = refresh.refresh_if_stale(force=True, sources=["celestrak_sw_all"])
+    code, note = r.status_of("celestrak_sw_all")
+    assert code == "fallback" and "celestrak_sw_all" not in r.succeeded
+    assert "備援檔" in note and "Connection refused" in note
+    assert "改用備援檔" in r.summary() and r.summary().startswith("更新 0/1")
+
+
+def test_summarize_failure_collapses_retries():
+    from services.ingest.base import summarize_failure
+
+    detail = ("RuntimeError: x 無法取得資料：attempt1: ConnectTimeout: HTTPSConnectionPool("
+              "host='egnss.nlsc.gov.tw', port=443): ... (connect timeout=30)); "
+              "attempt2: ConnectTimeout: ...; attempt3: ConnectTimeout: ...")
+    assert summarize_failure(detail) == "ConnectTimeout ×3（egnss.nlsc.gov.tw:443，每次逾時 30 秒）"
+    assert summarize_failure("HTTPError 503") == "HTTPError 503"
+
+
 # ── 動畫來源 ────────────────────────────────────────────────────────────
 def test_every_animation_has_attribution_and_valid_kind():
     from swx_core import animations

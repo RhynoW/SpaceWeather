@@ -138,6 +138,8 @@ class RefreshResult:
     #: 本次納入的來源清單。不在其中即代表**根本沒去抓**，
     #: 與「抓了但失敗」要用不同的話說——前者去看設定，後者去看網路。
     attempted: list[str] = field(default_factory=list)
+    #: 改用本機備援檔的來源。算不上成功：資料停在備援檔產製時刻，不會變新。
+    fallback: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -146,13 +148,17 @@ class RefreshResult:
     def status_of(self, source_id: str) -> tuple[str, str]:
         """單一來源在本次更新中的下場，回傳 (狀態碼, 人話)。
 
-        狀態碼：ok／empty／failed／skipped／not_run。
+        狀態碼：ok／empty／fallback／failed／skipped／not_run。
+        fallback＝遠端失敗而讀了本機備援檔：程式沒出錯，但資料不會變新。
         """
         if not self.ran:
             return "not_run", f"未執行更新（{self.reason}）"
         for sid, err in self.failed:
             if sid == source_id:
                 return "failed", err
+        if source_id in self.fallback:
+            note = "；".join(self.warnings.get(source_id, ())) or "遠端失敗，改用本機備援檔"
+            return "fallback", note
         if source_id in self.succeeded:
             note = "；".join(self.warnings.get(source_id, ()))
             rows = self.rows.get(source_id, 0)
@@ -166,8 +172,11 @@ class RefreshResult:
     def summary(self) -> str:
         if not self.ran:
             return f"未更新（{self.reason}）"
-        parts = [f"更新 {len(self.succeeded)}/{len(self.succeeded) + len(self.failed)} 個來源",
+        total = len(self.succeeded) + len(self.failed) + len(self.fallback)
+        parts = [f"更新 {len(self.succeeded)}/{total} 個來源",
                  f"寫入 {self.rows_written} 列", f"{self.elapsed_s:.1f}s"]
+        if self.fallback:
+            parts.append(f"改用備援檔（資料不會變新）：{', '.join(self.fallback)}")
         if self.failed:
             parts.append(f"失敗：{', '.join(sid for sid, _ in self.failed)}")
         return "，".join(parts)
@@ -215,7 +224,10 @@ def refresh_if_stale(
             outcome = run_source(source_id, store)
             if outcome.warnings:
                 result.warnings[source_id] = tuple(outcome.warnings)
-            if outcome.ok:
+            if outcome.ok and str(outcome.mode).startswith("local_fallback"):
+                result.fallback.append(source_id)
+                result.rows[source_id] = outcome.written
+            elif outcome.ok:
                 result.succeeded.append(source_id)
                 result.rows_written += outcome.written
                 result.rows[source_id] = outcome.written

@@ -156,6 +156,13 @@ class Connector(ABC):
 
         local = self.spec.local_path()
         if local and local.exists():
+            # 備援檔是某個時刻的快照，內容不會更新。不記下來的話，這一輪會被當成
+            # 「成功」，頁面上只看得到資料一直不變新（實測：雲端連不到 CelesTrak，
+            # 每輪都「成功」讀進 8 月的種子檔，F10.7 停在 08-16 三個月無人察覺）。
+            if self.spec.endpoint:
+                last = errors[-1].split(": ", 1)[-1] if errors else "未知原因"
+                self.warn(f"遠端失敗，改用本機備援檔 {local.name}（內容停在該檔產製時刻）："
+                          f"{last[:160]}")
             return local.read_bytes(), "local_fallback"
 
         raise RuntimeError(
@@ -305,6 +312,28 @@ _FAILURE_LAYERS: tuple[tuple[str, tuple[str, ...], str], ...] = (
     ("slow", ("ReadTimeout", "Read timed out"),
      "**已連上但回應逾時**：對方站台忙碌或回應過慢，通常是暫時性的，稍後重試。"),
 )
+
+
+def summarize_failure(detail: str) -> str:
+    """把重試多次的錯誤原文濃縮成一行，例如「ConnectTimeout ×3（egnss.nlsc.gov.tw:443，每次逾時 30 秒）」。
+
+    原文是三次重試的完整例外字串（含物件位址），直接倒在公開頁面上既難讀、
+    也沒有多給值勤人員任何資訊；完整原文另放可展開區塊給除錯用。
+    """
+    import re
+    from collections import Counter
+
+    kinds = re.findall(r"attempt\d+: (\w+)", detail or "")
+    if not kinds:
+        text = (detail or "").strip()
+        return text if len(text) <= 160 else text[:157] + "…"
+    kind, _ = Counter(kinds).most_common(1)[0]
+    where = re.search(r"host='([^']+)', port=(\d+)", detail)
+    timeout = re.search(r"timeout=(\d+(?:\.\d+)?)", detail)
+    extra = [f"{where.group(1)}:{where.group(2)}"] if where else []
+    if timeout:
+        extra.append(f"每次逾時 {float(timeout.group(1)):g} 秒")
+    return f"{kind} ×{len(kinds)}" + (f"（{'，'.join(extra)}）" if extra else "")
 
 
 def diagnose_fetch_failure(detail: str) -> tuple[str, str]:

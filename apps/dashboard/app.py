@@ -507,6 +507,7 @@ def source_refresh_note(source_id: str) -> tuple[str, str]:
       running   還在抓——等一下重新整理就有
       skipped   沒納入更新——去看設定（status、SWX_DISABLE_SOURCES）
       failed    抓了但失敗——去看網路、憑證、對方站台
+      fallback  連不到遠端、讀了本機備援檔——程式沒錯，但資料停在備援檔的時刻
       empty     抓到了但沒有可用資料——去看解析規則或對方版面
       ok        抓到了卻仍查不到——去看查詢窗與 grid_id
 
@@ -1749,22 +1750,23 @@ elif page == "RTK 現場查核":
                           "國土測繪中心主機只接受國內連線，本站台位於境外、無法擷取；"
                           "且數值授權仍在申請中。即時 I95 請於國內主機執行本系統，"
                           "或執行 `python tools/i95_smoke.py`。")
+        shown = detail
         if state == "failed":
-            # Streamlit Cloud 拉新版時只重跑本檔，已載入的模組仍是舊版；
-            # 舊模組沒有這個函式時退回不猜成因的說法，別讓診斷本身讓整頁崩潰。
-            try:
-                from services.ingest.base import diagnose_fetch_failure
-                _, layer = diagnose_fetch_failure(detail)
-            except ImportError:
-                layer = "無法判讀成因（站台模組版本不一致，Reboot 後即恢復）。"
+            from services.ingest.base import diagnose_fetch_failure, summarize_failure
+
+            _, layer = diagnose_fetch_failure(detail)
             hint = f"{layer} 本機可執行 `python tools/i95_smoke.py` 對照。"
+            shown = summarize_failure(detail)
         st.info(
             f"{head} {hint}\n\n"
-            f"最近一次自動更新對 `nlsc_egnss_i95` 的結果：**{state}** — {detail}\n\n"
+            f"最近一次自動更新對 `nlsc_egnss_i95` 的結果：**{state}** — {shown}\n\n"
             "本頁下方的矩陣與查核表不依賴 I95，仍可使用；"
             "地磁與閃焰等間接判據見「值勤模式」頁，但**間接判據不足以判斷 RTK 可否作業**"
             "（2026-08-26 實測：Kp≤0.67 的平靜日，I95 仍整個下午超過警戒值）。"
         )
+        if shown != detail:
+            with st.expander("技術細節（完整錯誤訊息）"):
+                st.code(detail, language=None, wrap_lines=True)
         st.markdown(f"##### 有資料時的顯示方式　<span style='color:#d84315'>"
                     f"【{I95_ILLUSTRATIVE}】</span>", unsafe_allow_html=True)
         st.warning(
@@ -2192,8 +2194,16 @@ elif page == "資料健康":
     if _result is None:
         st.caption("本站台自本次啟動後尚未執行自動更新（側欄可手動觸發）。")
     else:
-        STATE_ICON = {"ok": "✅", "empty": "⚪", "failed": "❌",
+        STATE_ICON = {"ok": "✅", "empty": "⚪", "fallback": "⚠️", "failed": "❌",
                       "skipped": "⏸", "not_run": "—"}
+        if _result.fallback:
+            st.warning(
+                "**以下來源連不到遠端，改用 repo 內的本機備援檔：** "
+                + "、".join(f"`{s}`" for s in _result.fallback)
+                + "。程式沒有出錯，但這些通道的資料**停在備援檔的產製時刻、不會變新**——"
+                "依它們算出的產品（如 F10.7 81 日平均、STK 驅動檔、阻力展望）同樣是舊的。"
+                "原因見下表「說明」欄。"
+            )
         rows = []
         for sid in sorted(set(_result.attempted) | {s.source_id for s in catalog().ready()}):
             st_code, detail = _result.status_of(sid)
