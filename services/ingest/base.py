@@ -151,6 +151,13 @@ class Connector(ABC):
                     return resp.content, "remote"
                 except Exception as exc:  # noqa: BLE001 - 需容忍任何網路層例外
                     errors.append(f"attempt{attempt}: {type(exc).__name__}: {exc}")
+                    # 連線階段逾時＝TCP 連線根本沒建立，多半是對方在網路層丟棄封包
+                    # （只放行特定來源位址）。這種情況重試也不會成功，只會把整輪
+                    # 更新拖長：雲端實測 CelesTrak 與 I95 各 3×30 秒，一輪多等約 3 分鐘，
+                    # 而各頁快取要整輪結束才清除。讀取逾時、5xx 等暫時性錯誤照常重試。
+                    if isinstance(exc, requests.exceptions.ConnectTimeout):
+                        errors[-1] += "（連線逾時不重試）"
+                        break
                     if attempt < self.retry_attempts:
                         time.sleep(self.retry_backoff_s * attempt)
 
@@ -328,6 +335,8 @@ def summarize_failure(detail: str) -> str:
         text = (detail or "").strip()
         return text if len(text) <= 160 else text[:157] + "…"
     kind, _ = Counter(kinds).most_common(1)[0]
+    if "連線逾時不重試" in detail:
+        kind += "（不重試）"
     where = re.search(r"host='([^']+)', port=(\d+)", detail)
     timeout = re.search(r"timeout=(\d+(?:\.\d+)?)", detail)
     extra = [f"{where.group(1)}:{where.group(2)}"] if where else []

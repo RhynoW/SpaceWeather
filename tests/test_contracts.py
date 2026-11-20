@@ -521,6 +521,42 @@ def test_local_fallback_is_not_reported_as_success(tmp_path, monkeypatch):
     assert "改用備援檔" in r.summary() and r.summary().startswith("更新 0/1")
 
 
+def test_connect_timeout_is_not_retried(monkeypatch, tmp_path):
+    """TCP 連線沒建立（對方網路層丟棄）就不重試；讀取逾時等暫時性錯誤照常重試。
+
+    雲端實測：CelesTrak 與 I95 各重試 3×30 秒，每輪更新多等約 3 分鐘。
+    """
+    import requests
+
+    from services.ingest import base as _base
+    from services.ingest.run import build
+    from swx_core import SwxStore, catalog
+
+    monkeypatch.setattr(_base.time, "sleep", lambda *_: None)
+    calls = []
+
+    def connect_timeout(*a, **k):
+        calls.append(1)
+        raise requests.exceptions.ConnectTimeout("Connection to x timed out. (connect timeout=30)")
+
+    monkeypatch.setattr(requests.Session, "get", connect_timeout)
+    conn = build(catalog()["nlsc_egnss_i95"], SwxStore(tmp_path))
+    with pytest.raises(RuntimeError, match="連線逾時不重試"):
+        conn.fetch_bytes()
+    assert len(calls) == 1
+
+    calls.clear()
+
+    def read_timeout(*a, **k):
+        calls.append(1)
+        raise requests.exceptions.ReadTimeout("read timed out")
+
+    monkeypatch.setattr(requests.Session, "get", read_timeout)
+    with pytest.raises(RuntimeError):
+        conn.fetch_bytes()
+    assert len(calls) == conn.retry_attempts > 1
+
+
 def test_summarize_failure_collapses_retries():
     from services.ingest.base import summarize_failure
 
@@ -627,3 +663,23 @@ def test_backfill_never_stamps_ingest_time_in_the_future():
     assert got.iloc[1] == pd.Timestamp(fetched), "觀測＋延遲超過取得時間 → 夾回取得時間"
     assert (got.iloc[2:] == pd.Timestamp(fetched)).all(), "預測列記為取得時間"
     assert (got <= pd.Timestamp(fetched)).all()
+
+
+def test_fallback_seed_updater_rejects_bad_files():
+    """更新備援檔前的檢查：錯誤頁、截斷檔都不得換進去（寧可不換也不換壞）。"""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from tools import update_fallback_seed as u
+
+    seed = (Path(__file__).resolve().parents[1] / "data" / "seed" / "SW-All.txt").read_text(
+        encoding="utf-8", errors="replace")
+    n_obs, updated = u.validate(seed)
+    assert n_obs >= u.MIN_OBSERVED_ROWS and updated is not None
+    with pytest.raises(ValueError, match="UPDATED"):
+        u.validate("<html>Forbidden</html>")
+    head = seed[: seed.index("BEGIN OBSERVED")] + "BEGIN OBSERVED\n" + "\n".join(
+        seed[seed.index("BEGIN OBSERVED"):].splitlines()[1:50]) + "\nEND OBSERVED\n"
+    with pytest.raises(ValueError, match="截斷"):
+        u.validate(head)

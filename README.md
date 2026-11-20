@@ -1054,12 +1054,20 @@ python -m services.ingest.refresh --force --full    # 強制，含重量級來�
 見 [docs/architecture.md](docs/architecture.md) §16.2 G13）。不濾掉會讓齡期變負值、
 自動更新永遠不觸發（有測試守住）。
 
+**雲端連不到 CelesTrak。** TCP 連線在網路層即被丟棄（`ConnectTimeout`，本機正常），多半是對方
+防火牆擋下雲端機房的位址段；程式無法修正。雲端因此每輪改讀 repo 內的備援檔 `data/seed/SW-All.txt`，
+資料健康頁會以「fallback」標示、說明資料不會變新。Kp／ap／F10.7 觀測另有 GFZ 與 SWPC 補上；
+只有 CelesTrak 獨有的 F10.7 81 日平均、CSSI 預測段停在備援檔的時刻——**對外展示前以
+`tools/update_fallback_seed.py` 更新它**（與預報快照同一份清單）。連線逾時不再重試
+（重試也不會成功，只會讓每輪更新多等數分鐘）。
+
 **雲端的預報頁顯示的是快照。** 預報模型需要多年的 Hp30／Kp 歷史才能訓練，
 雲端是空容器、只擷取近幾天資料，無法自行產生預報。預報頁在資料庫找不到本系統預報時，
 改讀隨版本發布的 `data/demo/forecast_snapshot/`，並在圖上方標明產生時刻與「不是此刻的預報」。
 快照與示範快照分開存放（後者停在另一個時刻，混進去會讓 CSSI 快照比對失真）。更新快照：
 
 ```bash
+python tools/update_fallback_seed.py                       # CelesTrak 備援檔：雲端連不到 CelesTrak，只能讀它
 python -m services.ingest.run --source gfz_hp30_nowcast   # 起報錨點要新（完整序列檔落後近一天）
 python -m services.forecast.run --predict --write --target hp30
 python -m services.forecast.run --predict --write --target kp
